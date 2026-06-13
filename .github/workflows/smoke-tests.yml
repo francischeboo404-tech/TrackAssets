@@ -1,0 +1,53 @@
+name: Frontend Smoke Tests
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    name: Build & Smoke Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run smoke checks
+        env:
+          BACKEND_URL: https://trackit-uxil.onrender.com
+          FRONTEND_URL: https://track-it-gamma-blue.vercel.app
+        run: |
+          set -eux
+          echo "Checking backend health..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health")
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "Backend health check failed: $HTTP_STATUS"
+            exit 1
+          fi
+
+          echo "Checking backend CORS preflight for register endpoint..."
+          PRE=$(curl -s -I -X OPTIONS -H "Origin: $FRONTEND_URL" -H "Access-Control-Request-Method: POST" "$BACKEND_URL/api/auth/register-org")
+          echo "$PRE"
+          echo "$PRE" | grep -i "Access-Control-Allow-Origin" | grep -F "$FRONTEND_URL" || (echo "CORS origin not allowed" && exit 1)
+          echo "$PRE" | grep -i "Access-Control-Allow-Methods" || (echo "CORS methods header missing" && exit 1)
+
+          echo "Checking frontend root returns 200..."
+          FRONT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$FRONTEND_URL/")
+          if [ "$FRONT_STATUS" != "200" ]; then
+            echo "Frontend root failed: $FRONT_STATUS"
+            exit 1
+          fi
+
+          echo "Smoke tests passed."

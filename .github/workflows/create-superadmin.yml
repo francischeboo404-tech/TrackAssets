@@ -1,0 +1,59 @@
+name: Create Superadmin (one-off)
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'Username for superadmin'
+        required: true
+        default: 'Frank'
+      email:
+        description: 'Email for superadmin'
+        required: true
+        default: 'frankadmin@trackit.com'
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL_PROD: ${{ secrets.DATABASE_URL_PROD }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Pre-flight checks
+        run: |
+          echo "Checking required environment variables (values hidden)..."
+          missing=false
+          for v in DATABASE_URL_PROD SECRET_KEY JWT_SECRET_KEY SUPERADMIN_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "MISSING: $v"
+              missing=true
+            else
+              echo "SET: $v"
+            fi
+          done
+          if [ "$missing" = true ]; then
+            echo "One or more required secrets are missing. Aborting job."
+            exit 2
+          fi
+          echo "Python version:"; python --version
+          echo "Listing repo files:"; ls -la
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+
+      - name: Create superadmin
+        env:
+          SUPERADMIN_PASSWORD: ${{ secrets.SUPERADMIN_PASSWORD }}
+        run: |
+          python backend/scripts/create_superadmin_prod.py --username "${{ github.event.inputs.username }}" --email "${{ github.event.inputs.email }}" --password "${{ secrets.SUPERADMIN_PASSWORD }}"
