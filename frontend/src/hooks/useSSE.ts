@@ -86,7 +86,6 @@ export const useSSE = () => {
 
     eventSource.onerror = (err) => {
       console.error('SSE connection error:', err);
-      eventSource.close();
     };
 
     return () => {

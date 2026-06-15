@@ -126,5 +126,10 @@ def stream_events():
     """Real-time event stream (SSE)."""
     org_id = get_current_organisation_id()
     return Response(
-        event_bus.stream(organisation_id=org_id), mimetype="text/event-stream"
+        event_bus.stream(organisation_id=org_id),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
