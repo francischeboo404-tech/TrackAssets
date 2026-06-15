@@ -218,7 +218,7 @@ const Inventory = () => {
                       )}
                     </td>
                     <td className="table-cell md:text-right relative" data-label="Quick Actions">
-                      <div className="flex items-center justify-end gap-1.5 opacity-100 md:opacity-0 group-hover:opacity-100 transition-all duration-300 md:translate-x-4 group-hover:translate-x-0">
+                      <div className="flex items-center justify-end gap-1.5">
                         {canAdjustStock(user?.role) && (
                           <>
                           <button 
