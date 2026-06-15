@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Package, Search, Plus, Minus, MoreVertical, Filter, AlertCircle, QrCode, ArrowUpRight, ArrowRightLeft } from 'lucide-react';
+import { Package, Search, Plus, Minus, MoreVertical, Filter, AlertCircle, QrCode, ArrowUpRight, ArrowRightLeft, Upload } from 'lucide-react';
 import { useInventory } from '../hooks/useInventory';
 import { cn } from '../lib/utils';
 import { StockAdjustmentModal } from '../components/ui/StockAdjustmentModal';
 import { useToast } from '../context/ToastContext';
 import { Can } from '../components/auth/Can';
 import { InventoryModal } from '../components/ui/InventoryModal';
+import { BulkImportModal } from '../components/ui/BulkImportModal';
 import { InventoryEditModal } from '../components/ui/InventoryEditModal';
 import { ConfirmDeleteModal } from '../components/ui/ConfirmDeleteModal';
 import { useDeleteInventoryItem } from '../hooks/useInventory';
@@ -30,6 +31,7 @@ const Inventory = () => {
   const [selectedItemForTransfer, setSelectedItemForTransfer] = useState<any>(null);
   const [isStockModalOpen, setIsStockModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -111,7 +113,13 @@ const Inventory = () => {
             <Filter className="w-4 h-4 text-slate-400 group-hover:text-brand-primary transition-colors" /> Advanced Filters
           </button>
           <Can roles={['admin', 'store_manager']}>
-            <button 
+            <button
+              onClick={() => setIsBulkImportOpen(true)}
+              className="btn-secondary flex items-center gap-2 group"
+            >
+              <Upload className="w-4 h-4 group-hover:text-brand-primary transition-colors" /> Import
+            </button>
+            <button
               onClick={() => setIsCreateModalOpen(true)}
               className="btn-primary flex items-center gap-2 shadow-[var(--shadow-elevation-2)] group"
             >
@@ -319,6 +327,12 @@ const Inventory = () => {
       <InventoryModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
+      />
+
+      <BulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        entity="inventory"
       />
 
       <InventoryEditModal

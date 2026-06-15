@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft } from 'lucide-react';
+import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload } from 'lucide-react';
 import { useAssets } from '../hooks/useAssets';
 import { AssetLifecycleActions } from '../components/ui/AssetLifecycleActions';
 import { canCreateAsset, canEditAsset, canRequestTransfer } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { AssetModal } from '../components/ui/AssetModal';
+import { BulkImportModal } from '../components/ui/BulkImportModal';
 import { AssetQRCode } from '../components/ui/AssetQRCode';
 import { Modal } from '../components/ui/Modal';
 import { TransferRequestModal } from '../components/ui/TransferRequestModal';
@@ -27,6 +28,7 @@ const Assets = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
   const [selectedAssetForQR, setSelectedAssetForQR] = useState<any>(null);
   const [selectedAssetForTransfer, setSelectedAssetForTransfer] = useState<any>(null);
@@ -87,13 +89,21 @@ const Assets = () => {
         </div>
         <div className="flex gap-3 relative z-10">
           {canCreateAsset(user?.role) && (
-            <button 
-              onClick={() => setIsModalOpen(true)}
-              className="btn-primary flex items-center gap-2 group shadow-[var(--shadow-elevation-2)]"
-              aria-label="Register New Asset"
-            >
-              <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" /> Add Asset
-            </button>
+            <>
+              <button
+                onClick={() => setIsBulkImportOpen(true)}
+                className="btn-secondary flex items-center gap-2 group"
+              >
+                <Upload className="w-4 h-4 group-hover:text-brand-primary transition-colors" /> Import
+              </button>
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="btn-primary flex items-center gap-2 group shadow-[var(--shadow-elevation-2)]"
+                aria-label="Register New Asset"
+              >
+                <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" /> Add Asset
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -268,10 +278,16 @@ const Assets = () => {
         </div>
       )}
 
-      <AssetModal 
-        isOpen={isModalOpen} 
-        onClose={handleCloseModal} 
+      <AssetModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
         asset={selectedAsset}
+      />
+
+      <BulkImportModal
+        isOpen={isBulkImportOpen}
+        onClose={() => setIsBulkImportOpen(false)}
+        entity="assets"
       />
 
       <Modal 

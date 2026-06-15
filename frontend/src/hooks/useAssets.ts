@@ -51,6 +51,20 @@ export const useUpdateAsset = () => {
   });
 };
 
+export const useBulkImportAssets = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: Record<string, unknown>[]) => {
+      const response = await api.post('/assets/bulk', { items });
+      return response.data as { succeeded: number; failed: number; results: { row: number; status: string; asset_id?: number; asset_code?: string; errors?: Record<string, unknown> }[] };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+};
+
 export const useAssetTransition = () => {
   const queryClient = useQueryClient();
   return useMutation({

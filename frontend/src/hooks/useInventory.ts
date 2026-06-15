@@ -65,6 +65,20 @@ export const useUpdateInventoryItem = () => {
   });
 };
 
+export const useBulkImportInventory = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: Record<string, unknown>[]) => {
+      const response = await api.post('/inventory/bulk', { items });
+      return response.data as { succeeded: number; failed: number; results: { row: number; status: string; item_id?: number; sku?: string; errors?: Record<string, unknown> }[] };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+};
+
 export const useDeleteInventoryItem = () => {
   const queryClient = useQueryClient();
   return useMutation({
