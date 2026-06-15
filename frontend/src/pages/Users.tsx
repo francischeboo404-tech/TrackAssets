@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users as UsersIcon, UserX, UserCheck, Mail, Search, Plus, X, Shield, Lock } from 'lucide-react';
+import { Users as UsersIcon, UserX, UserCheck, Mail, Search, Plus, X, Shield, Lock, Eye, EyeOff } from 'lucide-react';
 import { useUsers, useUpdateUserRole, useToggleUserStatus } from '../hooks/useUsers';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
@@ -23,6 +23,7 @@ const Users = () => {
     last_name: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   
   const { data, isLoading } = useUsers({ 
     search: search || undefined,
@@ -303,13 +304,20 @@ const Users = () => {
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Initial Password</label>
                   <div className="relative">
                     <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                      type="password"
+                    <input
+                      type={showPassword ? 'text' : 'password'}
                       required
                       value={newUser.password}
                       onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all text-sm"
+                      className="w-full pl-10 pr-12 py-3 bg-slate-50 border-none rounded-xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all text-sm"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
                 <div className="space-y-2">

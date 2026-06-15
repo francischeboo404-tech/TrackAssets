@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Building2, User, Mail, Lock, CheckCircle2, ChevronRight, Loader2, Globe } from 'lucide-react';
+import { Building2, User, Mail, Lock, CheckCircle2, ChevronRight, Loader2, Globe, Eye, EyeOff } from 'lucide-react';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { cn } from '../lib/utils';
@@ -8,6 +8,8 @@ import { cn } from '../lib/utils';
 const Register = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const { addToast } = useToast();
   const navigate = useNavigate();
 
@@ -273,26 +275,42 @@ const Register = () => {
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Password</label>
                     <div className="relative">
                       <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                      <input 
+                      <input
                         name="admin_password"
-                        type="password" 
+                        type={showPassword ? 'text' : 'password'}
                         required
                         value={formData.admin_password}
                         onChange={handleChange}
-                        className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all"
+                        className="w-full pl-12 pr-12 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all"
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
                     </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Confirm</label>
-                    <input 
-                      name="confirm_password"
-                      type="password" 
-                      required
-                      value={formData.confirm_password}
-                      onChange={handleChange}
-                      className="w-full px-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all"
-                    />
+                    <div className="relative">
+                      <input
+                        name="confirm_password"
+                        type={showConfirm ? 'text' : 'password'}
+                        required
+                        value={formData.confirm_password}
+                        onChange={handleChange}
+                        className="w-full pl-4 pr-12 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500/20 outline-none font-bold text-slate-700 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirm(!showConfirm)}
+                        className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
+                      >
+                        {showConfirm ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
