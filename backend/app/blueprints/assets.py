@@ -342,6 +342,66 @@ def get_qr_sticker(asset_id):
     )
 
 
+@assets_bp.route("/bulk", methods=["POST"])
+@jwt_required_with_user
+@require_permission("assets:create")
+@limiter.limit("5 per minute")
+def bulk_import_assets():
+    """Bulk import assets from a parsed JSON array (max 500 rows)."""
+    data = request.get_json()
+    org_id = get_current_organisation_id()
+
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list) or len(items) == 0:
+        raise ValidationError("Request must include a non-empty 'items' array")
+
+    if len(items) > 500:
+        raise ValidationError("Bulk import is limited to 500 rows per request")
+
+    results = []
+    succeeded = 0
+    failed = 0
+
+    for index, row in enumerate(items):
+        validated_data, errors = validate_input(AssetSchema, row)
+        if errors:
+            failed += 1
+            results.append({"row": index, "status": "error", "errors": errors})
+            continue
+
+        validated_data["name"] = sanitize_string(validated_data["name"])
+        if "assigned_to" in validated_data:
+            validated_data["assigned_to"] = sanitize_string(validated_data["assigned_to"])
+        if "location" in validated_data:
+            validated_data["location"] = sanitize_string(validated_data["location"])
+
+        try:
+            new_asset = asset_service.create_asset(org_id, validated_data)
+            succeeded += 1
+            results.append({
+                "row": index,
+                "status": "created",
+                "asset_id": new_asset.id,
+                "asset_code": new_asset.asset_code,
+            })
+        except Exception as e:
+            db.session.rollback()
+            failed += 1
+            results.append({"row": index, "status": "error", "errors": {"_error": str(e)}})
+
+    return jsonify({
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }), 207 if failed > 0 else 201
+
+
+@assets_bp.route("/bulk", methods=["OPTIONS"])
+def bulk_import_assets_options():
+    """CORS preflight for bulk asset import."""
+    return ('', 204)
+
+
 @assets_bp.route("/bulk-qr", methods=["GET"])
 @jwt_required_with_user
 def get_bulk_qr():
