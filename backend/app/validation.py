@@ -157,16 +157,23 @@ class AssetStatusUpdateSchema(Schema):
         required=True,
         validate=validate.OneOf(
             [
-                "requested",
-                "approved",
-                "rejected",
-                "in_use",
-                "maintenance",
+                "available",
+                "assigned",
+                "under_maintenance",
+                "lost",
+                "damaged",
                 "disposed",
             ]
         ),
     )
     comments = fields.Str(validate=validate.Length(max=1000), allow_none=True)
+
+
+class AssetAssignSchema(Schema):
+    user_id = fields.Int(required=True, validate=validate.Range(min=1))
+    department_id = fields.Int(required=True, validate=validate.Range(min=1))
+    assignment_date = fields.Date(required=True)
+    return_date = fields.Date(load_default=None, allow_none=True)
 
 
 class TransferRequestSchema(Schema):

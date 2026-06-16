@@ -18,6 +18,7 @@ from app.errors import AuthorizationError, NotFoundError, ValidationError
 from app.models import asset
 from app.validation import (
     AssetSchema,
+    AssetAssignSchema,
     AssetStatusUpdateSchema,
     validate_input,
     sanitize_string,
@@ -78,6 +79,14 @@ def get_assets():
                             a.department.name if a.department else None
                         ),
                         "assigned_to": a.assigned_to,
+                        "assigned_to_user_id": a.assigned_to_user_id,
+                        "assigned_department_id": a.assigned_department_id,
+                        "assignment_date": (
+                            a.assignment_date.isoformat() if a.assignment_date else None
+                        ),
+                        "return_date": (
+                            a.return_date.isoformat() if a.return_date else None
+                        ),
                         "status": a.status,
                         "condition": a.condition,
                         "location": a.location,
@@ -138,6 +147,14 @@ def get_asset(asset_id):
                     asset_obj.department.name if asset_obj.department else None
                 ),
                 "assigned_to": asset_obj.assigned_to,
+                "assigned_to_user_id": asset_obj.assigned_to_user_id,
+                "assigned_department_id": asset_obj.assigned_department_id,
+                "assignment_date": (
+                    asset_obj.assignment_date.isoformat() if asset_obj.assignment_date else None
+                ),
+                "return_date": (
+                    asset_obj.return_date.isoformat() if asset_obj.return_date else None
+                ),
                 "status": asset_obj.status,
                 "condition": asset_obj.condition,
                 "location": asset_obj.location,
@@ -290,6 +307,50 @@ def update_asset_status(asset_id):
 @assets_bp.route("/<int:asset_id>/status", methods=["OPTIONS"])
 def update_asset_status_options(asset_id):
     """CORS preflight for updating asset status."""
+    return ('', 204)
+
+
+@assets_bp.route("/<int:asset_id>/assign", methods=["POST"])
+@jwt_required_with_user
+@require_permission("assets:edit")
+@limiter.limit("30 per minute")
+def assign_asset(asset_id):
+    """Assign an asset to an employee, setting status to assigned."""
+    data = request.get_json()
+    org_id = get_current_organisation_id()
+
+    validated_data, errors = validate_input(AssetAssignSchema, data)
+    if errors:
+        raise ValidationError("Validation failed", errors)
+
+    asset_obj = asset_service.assign_asset(
+        asset_id, org_id, validated_data, acting_user_id=g.user.id
+    )
+
+    return (
+        jsonify(
+            {
+                "message": "Asset assigned successfully",
+                "asset_id": asset_obj.id,
+                "status": asset_obj.status,
+                "assigned_to": asset_obj.assigned_to,
+                "assignment_date": (
+                    asset_obj.assignment_date.isoformat()
+                    if asset_obj.assignment_date
+                    else None
+                ),
+                "return_date": (
+                    asset_obj.return_date.isoformat() if asset_obj.return_date else None
+                ),
+            }
+        ),
+        200,
+    )
+
+
+@assets_bp.route("/<int:asset_id>/assign", methods=["OPTIONS"])
+def assign_asset_options(asset_id):
+    """CORS preflight for assigning an asset."""
     return ('', 204)
 
 
