@@ -12,8 +12,14 @@ class TransferRepository:
         requested_by,
         from_dept_id,
         to_dept_id,
+        transfer_type="department_to_department",
         requested_location=None,
         comment=None,
+        from_user_id=None,
+        to_user_id=None,
+        from_warehouse_id=None,
+        to_warehouse_id=None,
+        to_bin_id=None,
         session=None,
     ):
         sess = session or db.session
@@ -23,8 +29,14 @@ class TransferRepository:
             requested_by=requested_by,
             from_department_id=from_dept_id,
             to_department_id=to_dept_id,
+            transfer_type=transfer_type,
             requested_location=requested_location,
             comment=comment,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            from_warehouse_id=from_warehouse_id,
+            to_warehouse_id=to_warehouse_id,
+            to_bin_id=to_bin_id,
         )
         sess.add(req)
         return req

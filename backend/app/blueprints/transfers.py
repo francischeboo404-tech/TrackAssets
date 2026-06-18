@@ -17,6 +17,7 @@ from app.errors import (
     ValidationError,
 )
 from app.models import asset, organization, transfer
+from app.models.transfer import TransferType
 from app.validation import (
     TransferRequestSchema,
     TransferReviewSchema,
@@ -46,61 +47,85 @@ def request_transfer():
         raise ValidationError("Validation failed", errors)
 
     item_type = validated_data.get("item_type", "asset")
-    
-    # Check if new department exists and belongs to organization
-    new_dept = organization.Department.query.filter_by(
-        id=validated_data["new_department_id"],
-        organisation_id=org_id,
-        is_active=True,
-    ).first()
-
-    if not new_dept:
-        raise ValidationError("Invalid destination department")
+    transfer_type = validated_data["transfer_type"]
 
     if item_type == "asset":
         if not validated_data.get("asset_id"):
             raise ValidationError("asset_id is required for asset transfers")
-            
-        # Get asset
+
         asset_obj = asset.Asset.query.filter_by(
             id=validated_data["asset_id"], organisation_id=org_id
         ).first()
-
         if not asset_obj:
             raise NotFoundError("Asset not found")
 
-        # Check if asset can be transferred (not disposed)
         if asset_obj.status == "disposed":
             raise ValidationError("Cannot transfer a disposed asset")
 
-        # Check if transfer already requested
         existing_request = transfer.TransferRequest.query.filter_by(
-            asset_id=validated_data["asset_id"], 
+            asset_id=validated_data["asset_id"],
             organisation_id=org_id,
-            status="pending"
+            status="pending",
         ).first()
-
         if existing_request:
             raise ConflictError("Transfer already requested for this asset")
-            
+
         from_dept_id = asset_obj.department_id
-        
-        # Create transfer request for asset
+        to_dept_id = from_dept_id  # dept unchanged unless dept-to-dept
+        from_user_id = None
+        to_user_id = None
+        from_warehouse_id_val = None
+
+        if transfer_type == TransferType.EMPLOYEE_TO_EMPLOYEE:
+            if asset_obj.status != "assigned":
+                raise ValidationError("Asset must be currently assigned for an employee-to-employee transfer")
+            from_user_id = asset_obj.assigned_to_user_id
+            to_user_id = validated_data["to_user_id"]
+            if to_user_id == from_user_id:
+                raise ValidationError("Cannot transfer asset to the same user")
+            to_user = organization.User.query.filter_by(
+                id=to_user_id, organisation_id=org_id, is_active=True
+            ).first()
+            if not to_user:
+                raise NotFoundError("Destination user not found")
+
+        elif transfer_type == TransferType.WAREHOUSE_TO_WAREHOUSE:
+            from_warehouse_id_val = asset_obj.warehouse_id
+            from app.models.location_topology import Warehouse
+            to_warehouse = Warehouse.query.filter_by(
+                id=validated_data["to_warehouse_id"], organisation_id=org_id
+            ).first()
+            if not to_warehouse:
+                raise NotFoundError("Destination warehouse not found")
+
+        else:  # department_to_department
+            new_dept = organization.Department.query.filter_by(
+                id=validated_data["new_department_id"],
+                organisation_id=org_id,
+                is_active=True,
+            ).first()
+            if not new_dept:
+                raise ValidationError("Invalid destination department")
+            to_dept_id = validated_data["new_department_id"]
+
         transfer_request = transfer.TransferRequest(
             organisation_id=org_id,
             item_type="asset",
+            transfer_type=transfer_type,
             asset_id=validated_data["asset_id"],
             requested_by=g.user.id,
             from_department_id=from_dept_id,
-            to_department_id=validated_data["new_department_id"],
+            to_department_id=to_dept_id,
+            from_user_id=from_user_id,
+            to_user_id=to_user_id,
+            from_warehouse_id=from_warehouse_id_val,
             requested_location=validated_data.get("new_location"),
             to_warehouse_id=validated_data.get("to_warehouse_id"),
             to_bin_id=validated_data.get("to_bin_id"),
             comment=validated_data.get("comment"),
         )
         db.session.add(transfer_request)
-        
-        # Audit log
+
         AuditService.log_action(
             action="TRANSFER_REQUESTED",
             entity_type="transfer_request",
@@ -108,31 +133,34 @@ def request_transfer():
             details={
                 "asset_id": asset_obj.id,
                 "asset_code": asset_obj.asset_code,
+                "transfer_type": transfer_type,
                 "from_department": from_dept_id,
-                "to_department": validated_data["new_department_id"],
+                "to_department": to_dept_id,
+                "from_user_id": from_user_id,
+                "to_user_id": to_user_id,
+                "reason": validated_data.get("comment"),
                 "requested_by": g.user.username,
             },
             organisation_id=org_id,
         )
 
     else:
-        # Inventory Transfer
+        # Inventory Transfer — always department-to-department
         if not validated_data.get("inventory_item_id"):
             raise ValidationError("inventory_item_id is required for inventory transfers")
-            
-        # Check inventory item
+        if not validated_data.get("new_department_id"):
+            raise ValidationError("new_department_id is required for inventory transfers")
+
         from app.models.inventory import InventoryItem, WarehouseStock
         inv_item = InventoryItem.query.filter_by(
             id=validated_data["inventory_item_id"], organisation_id=org_id
         ).first()
-        
         if not inv_item:
             raise NotFoundError("Inventory item not found")
-            
+
         quantity = validated_data.get("quantity", 1)
         from_warehouse_id = validated_data.get("from_warehouse_id")
-        
-        # Validate stock availability
+
         if from_warehouse_id:
             stock = WarehouseStock.query.filter_by(item_id=inv_item.id, warehouse_id=from_warehouse_id).first()
             if not stock or stock.quantity_on_hand < quantity:
@@ -140,15 +168,13 @@ def request_transfer():
         else:
             if inv_item.quantity < quantity:
                 raise ValidationError("Insufficient global stock.")
-                
-        # We need a from_department_id. Since inventory is global, we can use the requester's department, or just allow null if the schema allows it. But we couldn't drop NOT NULL easily, so let's default to the requester's department or the new_department_id if unknown.
-        # Wait, users have `department` as string. Let's use new_department_id as a fallback.
-        from_dept_id = validated_data["new_department_id"] 
-        
-        # Create transfer request for inventory
+
+        from_dept_id = validated_data["new_department_id"]
+
         transfer_request = transfer.TransferRequest(
             organisation_id=org_id,
             item_type="inventory",
+            transfer_type=TransferType.DEPARTMENT_TO_DEPARTMENT,
             inventory_item_id=inv_item.id,
             quantity=quantity,
             requested_by=g.user.id,
@@ -160,7 +186,7 @@ def request_transfer():
             comment=validated_data.get("comment"),
         )
         db.session.add(transfer_request)
-        
+
         AuditService.log_action(
             action="TRANSFER_REQUESTED",
             entity_type="transfer_request",
@@ -294,6 +320,8 @@ def get_transfer_requests():
         joinedload(transfer.TransferRequest.reviewer),
         joinedload(transfer.TransferRequest.from_department),
         joinedload(transfer.TransferRequest.to_department),
+        joinedload(transfer.TransferRequest.from_user),
+        joinedload(transfer.TransferRequest.to_user),
     ).filter_by(organisation_id=org_id)
 
     if status and status != "all":
@@ -345,6 +373,7 @@ def get_transfer_requests():
                     {
                         "id": r.id,
                         "item_type": r.item_type,
+                        "transfer_type": r.transfer_type,
                         "asset_id": r.asset_id,
                         "inventory_item_id": r.inventory_item_id,
                         "quantity": r.quantity,
@@ -352,13 +381,23 @@ def get_transfer_requests():
                         "asset_name": r.asset.name if r.asset else (r.inventory_item.name if r.inventory_item else None),
                         "from_department": r.from_department_id,
                         "from_department_name": (
-                            r.from_department.name
-                            if r.from_department
-                            else None
+                            r.from_department.name if r.from_department else None
                         ),
                         "to_department": r.to_department_id,
                         "to_department_name": (
                             r.to_department.name if r.to_department else None
+                        ),
+                        "from_user_id": r.from_user_id,
+                        "from_user_name": (
+                            (f"{r.from_user.first_name or ''} {r.from_user.last_name or ''}".strip()
+                             or r.from_user.username)
+                            if r.from_user else None
+                        ),
+                        "to_user_id": r.to_user_id,
+                        "to_user_name": (
+                            (f"{r.to_user.first_name or ''} {r.to_user.last_name or ''}".strip()
+                             or r.to_user.username)
+                            if r.to_user else None
                         ),
                         "requested_location": r.requested_location,
                         "comment": r.comment,
@@ -371,9 +410,7 @@ def get_transfer_requests():
                             r.reviewer.username if r.reviewer else None
                         ),
                         "reviewed_at": (
-                            r.reviewed_at.isoformat()
-                            if r.reviewed_at
-                            else None
+                            r.reviewed_at.isoformat() if r.reviewed_at else None
                         ),
                         "review_comments": r.review_comments,
                     }
@@ -602,7 +639,6 @@ def dispatch_transfer_request(request_id):
         raise NotFoundError("Transfer request not found or not approved")
 
     transfer_req.status = "in_transit"
-    destination = transfer_req.to_department.name if transfer_req.to_department else "Destination"
 
     if transfer_req.item_type == "asset":
         asset_obj = (
@@ -614,7 +650,22 @@ def dispatch_transfer_request(request_id):
             raise NotFoundError("Asset not found")
 
         old_location = asset_obj.location
-        asset_obj.location = f"In Transit to {destination}"
+        tr_type = transfer_req.transfer_type or TransferType.DEPARTMENT_TO_DEPARTMENT
+
+        if tr_type == TransferType.EMPLOYEE_TO_EMPLOYEE:
+            to_user = transfer_req.to_user
+            dest = (f"{to_user.first_name or ''} {to_user.last_name or ''}".strip()
+                    or to_user.username) if to_user else "New Owner"
+            asset_obj.location = f"Transfer in Progress to {dest}"
+        elif tr_type == TransferType.WAREHOUSE_TO_WAREHOUSE:
+            from app.models.location_topology import Warehouse
+            to_wh = Warehouse.query.get(transfer_req.to_warehouse_id)
+            dest = to_wh.name if to_wh else "Destination Warehouse"
+            asset_obj.location = f"In Transit to {dest}"
+        else:
+            dest = transfer_req.to_department.name if transfer_req.to_department else "Destination"
+            asset_obj.location = f"In Transit to {dest}"
+
         asset_obj.updated_at = db.func.now()
 
         # Vacate the old bin during transit
@@ -624,7 +675,7 @@ def dispatch_transfer_request(request_id):
             if old_bin:
                 old_bin.status = "available"
             asset_obj.bin_id = None
-            
+
         item_id = asset_obj.id
     else:
         # Inventory Transfer dispatch
@@ -727,45 +778,109 @@ def receive_transfer_request(request_id):
         if not asset_obj:
             raise NotFoundError("Asset not found")
 
-        old_dept_id = asset_obj.department_id
-        old_bin_id = asset_obj.bin_id
+        tr_type = transfer_req.transfer_type or TransferType.DEPARTMENT_TO_DEPARTMENT
 
-        # Update state
-        asset_obj.department_id = transfer_req.to_department_id
-        
-        if transfer_req.requested_location:
-            asset_obj.location = transfer_req.requested_location
-        else:
-            asset_obj.location = transfer_req.to_department.name if transfer_req.to_department else "Received"
-            
-        asset_obj.warehouse_id = transfer_req.to_warehouse_id or asset_obj.warehouse_id
-        asset_obj.bin_id = transfer_req.to_bin_id or asset_obj.bin_id
-        asset_obj.updated_at = db.func.now()
+        if tr_type == TransferType.EMPLOYEE_TO_EMPLOYEE:
+            from datetime import date
+            to_user = transfer_req.to_user
+            if not to_user:
+                raise NotFoundError("Destination user not found")
+            full_name = f"{to_user.first_name or ''} {to_user.last_name or ''}".strip()
+            asset_obj.assigned_to_user_id = to_user.id
+            asset_obj.assigned_to = full_name or to_user.username
+            asset_obj.assignment_date = date.today()
+            if transfer_req.requested_location:
+                asset_obj.location = transfer_req.requested_location
+            asset_obj.updated_at = db.func.now()
 
-        # Manage bin status interoperability
-        from app.models.location_topology import WarehouseBin
-        
-        if old_bin_id and old_bin_id != asset_obj.bin_id:
-            old_bin = WarehouseBin.query.get(old_bin_id)
-            if old_bin:
-                old_bin.status = "available"
-                
-        if asset_obj.bin_id and asset_obj.bin_id != old_bin_id:
-            new_bin = WarehouseBin.query.get(asset_obj.bin_id)
-            if new_bin:
-                new_bin.status = "occupied"
+            AuditService.log_action(
+                action="ASSET_TRANSFER",
+                entity_type="asset",
+                entity_id=asset_obj.id,
+                details={
+                    "transfer_type": "employee_to_employee",
+                    "from_user_id": transfer_req.from_user_id,
+                    "to_user_id": to_user.id,
+                    "to_owner": asset_obj.assigned_to,
+                    "transfer_request_id": transfer_req.id,
+                    "received_by": g.user.username,
+                    "reason": transfer_req.comment,
+                },
+                organisation_id=org_id,
+            )
 
-        # Audit logs
-        AuditService.log_transfer(
-            asset_obj,
-            old_dept_id,
-            transfer_req.to_department_id,
-            details={
-                "transfer_request_id": transfer_req.id,
-                "received_by": g.user.username,
-                "new_location": asset_obj.location,
-            },
-        )
+        elif tr_type == TransferType.WAREHOUSE_TO_WAREHOUSE:
+            from app.models.location_topology import WarehouseBin
+            old_bin_id = asset_obj.bin_id
+
+            asset_obj.warehouse_id = transfer_req.to_warehouse_id
+            asset_obj.bin_id = transfer_req.to_bin_id
+            if transfer_req.requested_location:
+                asset_obj.location = transfer_req.requested_location
+            asset_obj.updated_at = db.func.now()
+
+            if old_bin_id and old_bin_id != asset_obj.bin_id:
+                old_bin = WarehouseBin.query.get(old_bin_id)
+                if old_bin:
+                    old_bin.status = "available"
+            if asset_obj.bin_id and asset_obj.bin_id != old_bin_id:
+                new_bin = WarehouseBin.query.get(asset_obj.bin_id)
+                if new_bin:
+                    new_bin.status = "occupied"
+
+            AuditService.log_action(
+                action="ASSET_TRANSFER",
+                entity_type="asset",
+                entity_id=asset_obj.id,
+                details={
+                    "transfer_type": "warehouse_to_warehouse",
+                    "from_warehouse_id": transfer_req.from_warehouse_id,
+                    "to_warehouse_id": transfer_req.to_warehouse_id,
+                    "transfer_request_id": transfer_req.id,
+                    "received_by": g.user.username,
+                    "reason": transfer_req.comment,
+                },
+                organisation_id=org_id,
+            )
+
+        else:  # department_to_department
+            from app.models.location_topology import WarehouseBin
+            old_dept_id = asset_obj.department_id
+            old_bin_id = asset_obj.bin_id
+
+            asset_obj.department_id = transfer_req.to_department_id
+            if transfer_req.requested_location:
+                asset_obj.location = transfer_req.requested_location
+            else:
+                asset_obj.location = (
+                    transfer_req.to_department.name if transfer_req.to_department else "Received"
+                )
+            asset_obj.warehouse_id = transfer_req.to_warehouse_id or asset_obj.warehouse_id
+            asset_obj.bin_id = transfer_req.to_bin_id or asset_obj.bin_id
+            asset_obj.updated_at = db.func.now()
+
+            if old_bin_id and old_bin_id != asset_obj.bin_id:
+                old_bin = WarehouseBin.query.get(old_bin_id)
+                if old_bin:
+                    old_bin.status = "available"
+            if asset_obj.bin_id and asset_obj.bin_id != old_bin_id:
+                new_bin = WarehouseBin.query.get(asset_obj.bin_id)
+                if new_bin:
+                    new_bin.status = "occupied"
+
+            AuditService.log_transfer(
+                asset_obj,
+                old_dept_id,
+                transfer_req.to_department_id,
+                details={
+                    "transfer_type": "department_to_department",
+                    "transfer_request_id": transfer_req.id,
+                    "received_by": g.user.username,
+                    "new_location": asset_obj.location,
+                    "reason": transfer_req.comment,
+                },
+            )
+
         item_id = asset_obj.id
     else:
         # Inventory transfer receive — use inventory service for consistent stock logging

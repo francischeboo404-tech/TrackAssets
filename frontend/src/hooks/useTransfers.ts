@@ -3,16 +3,32 @@ import api from '../services/api';
 
 export interface TransferRequest {
   id: number;
+  transfer_type: 'employee_to_employee' | 'department_to_department' | 'warehouse_to_warehouse';
   asset_id: number;
   asset_code: string;
   asset_name: string;
   from_department_name: string;
   to_department_name: string;
+  from_user_id?: number;
+  from_user_name?: string;
+  to_user_id?: number;
+  to_user_name?: string;
   requested_location: string;
   comment: string;
   status: 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected';
   requested_by: string;
   requested_at: string;
+}
+
+export interface TransferRequestPayload {
+  transfer_type: 'employee_to_employee' | 'department_to_department' | 'warehouse_to_warehouse';
+  asset_id: number;
+  to_user_id?: number;
+  new_department_id?: number;
+  to_warehouse_id?: number;
+  to_bin_id?: number;
+  new_location?: string;
+  comment?: string;
 }
 
 export const useTransferRequests = (status: 'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected' = 'pending', page = 1, search?: string) => {
@@ -46,8 +62,9 @@ export const useApproveTransfer = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transfer-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
-    }
+    },
   });
 };
 
@@ -60,20 +77,25 @@ export const useRejectTransfer = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transfer-requests'] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
+    },
   });
 };
 
 export const useRequestTransfer = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { asset_id: number; new_department_id: number; new_location?: string; comment?: string; to_warehouse_id?: number; to_bin_id?: number }) => {
+    mutationFn: async (data: TransferRequestPayload) => {
       const response = await api.post('/transfers/request', data);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['transfer-requests'] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset', variables.asset_id] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
   });
 };
 
@@ -86,8 +108,9 @@ export const useDispatchTransfer = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transfer-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
-    }
+    },
   });
 };
 
@@ -100,7 +123,9 @@ export const useReceiveTransfer = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['transfer-requests'] });
+      queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
-    }
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
   });
 };

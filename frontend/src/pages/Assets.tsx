@@ -9,7 +9,7 @@ import { AssetModal } from '../components/ui/AssetModal';
 import { BulkImportModal } from '../components/ui/BulkImportModal';
 import { AssetQRCode } from '../components/ui/AssetQRCode';
 import { Modal } from '../components/ui/Modal';
-import { TransferRequestModal } from '../components/ui/TransferRequestModal';
+import { TransferAssetModal } from '../components/ui/TransferAssetModal';
 import { AssignAssetModal } from '../components/ui/AssignAssetModal';
 import { ReturnAssetModal } from '../components/ui/ReturnAssetModal';
 import { useAuth } from '../context/AuthContext';
@@ -265,11 +265,11 @@ const Assets = () => {
                       >
                         <QrCode className="w-4 h-4 group-hover/qr:scale-110 transition-transform" />
                       </button>
-                      {canRequestTransfer(user?.role) && (
+                      {canRequestTransfer(user?.role) && asset.status !== 'disposed' && (
                         <button
                           onClick={() => setSelectedAssetForTransfer(asset)}
-                          className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-brand-primary rounded-lg transition-colors group/transfer border border-transparent hover:border-slate-200"
-                          title="Request Transfer"
+                          className="w-8 h-8 flex items-center justify-center hover:bg-teal-50 text-slate-400 hover:text-teal-600 rounded-lg transition-colors group/transfer border border-transparent hover:border-teal-200"
+                          title="Transfer Asset"
                         >
                           <ArrowRightLeft className="w-4 h-4 group-hover/transfer:scale-110 transition-transform" />
                         </button>
@@ -339,7 +339,7 @@ const Assets = () => {
           />
         )}
       </Modal>
-      <TransferRequestModal
+      <TransferAssetModal
         isOpen={!!selectedAssetForTransfer}
         onClose={() => setSelectedAssetForTransfer(null)}
         asset={selectedAssetForTransfer}
