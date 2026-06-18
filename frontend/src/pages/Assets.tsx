@@ -1,24 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload } from 'lucide-react';
+import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload, UserPlus, UserCheck } from 'lucide-react';
 import { useAssets } from '../hooks/useAssets';
 import { AssetLifecycleActions } from '../components/ui/AssetLifecycleActions';
-import { canCreateAsset, canEditAsset, canRequestTransfer } from '../lib/permissions';
+import { canCreateAsset, canEditAsset, canRequestTransfer, canAssignAsset } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { AssetModal } from '../components/ui/AssetModal';
 import { BulkImportModal } from '../components/ui/BulkImportModal';
 import { AssetQRCode } from '../components/ui/AssetQRCode';
 import { Modal } from '../components/ui/Modal';
 import { TransferRequestModal } from '../components/ui/TransferRequestModal';
+import { AssignAssetModal } from '../components/ui/AssignAssetModal';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const STATUS_THEMES = {
-  requested: 'bg-sky-50 text-sky-700 border-sky-200/50',
-  approved: 'bg-indigo-50 text-indigo-700 border-indigo-200/50',
-  rejected: 'bg-rose-50 text-rose-700 border-rose-200/50',
-  in_use: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
-  maintenance: 'bg-amber-50 text-amber-700 border-amber-200/50',
+  available: 'bg-emerald-50 text-emerald-700 border-emerald-200/50',
+  assigned: 'bg-indigo-50 text-indigo-700 border-indigo-200/50',
+  under_maintenance: 'bg-amber-50 text-amber-700 border-amber-200/50',
+  lost: 'bg-rose-50 text-rose-700 border-rose-200/50',
+  damaged: 'bg-orange-50 text-orange-700 border-orange-200/50',
   disposed: 'bg-slate-50 text-slate-600 border-slate-200/50',
 };
 
@@ -32,6 +33,7 @@ const Assets = () => {
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
   const [selectedAssetForQR, setSelectedAssetForQR] = useState<any>(null);
   const [selectedAssetForTransfer, setSelectedAssetForTransfer] = useState<any>(null);
+  const [selectedAssetForAssign, setSelectedAssetForAssign] = useState<any>(null);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -60,11 +62,11 @@ const Assets = () => {
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, string> = {
-      requested: 'Requested',
-      approved: 'Approved',
-      rejected: 'Rejected',
-      in_use: 'In Use',
-      maintenance: 'Maintenance',
+      available: 'Available',
+      assigned: 'Assigned',
+      under_maintenance: 'Under Maintenance',
+      lost: 'Lost',
+      damaged: 'Damaged',
       disposed: 'Disposed',
     };
     return labels[status] || status;
@@ -176,7 +178,7 @@ const Assets = () => {
                     </div>
                     <div className={cn(
                       "px-2.5 py-1 rounded-md text-[10px] font-bold border uppercase tracking-widest whitespace-nowrap shadow-sm",
-                      STATUS_THEMES[asset.status as keyof typeof STATUS_THEMES] || STATUS_THEMES.requested
+                      STATUS_THEMES[asset.status as keyof typeof STATUS_THEMES] || STATUS_THEMES.available
                     )}>
                       {getStatusLabel(asset.status)}
                     </div>
@@ -209,6 +211,17 @@ const Assets = () => {
                       </div>
                       <span className="text-[13px] font-bold">KES {asset.current_value?.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
                     </div>
+                    {asset.status === 'assigned' && asset.assigned_to && (
+                      <div className="col-span-2 flex items-center gap-2 bg-indigo-50/70 rounded-lg px-2.5 py-2 border border-indigo-100/60">
+                        <UserCheck className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                        <span className="text-[12px] font-semibold text-indigo-700 truncate flex-1">{asset.assigned_to}</span>
+                        {asset.assignment_date && (
+                          <span className="text-[10px] text-indigo-400 flex-shrink-0">
+                            {new Date(asset.assignment_date).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="pt-3 border-t border-slate-100/60">
@@ -225,7 +238,16 @@ const Assets = () => {
                       <div className="w-7 h-7 rounded-full border-2 border-white bg-indigo-50 flex items-center justify-center text-[9px] font-bold text-brand-primary shadow-sm">+2</div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button 
+                      {canAssignAsset(user?.role) && (asset.status === 'available' || asset.status === 'under_maintenance') && (
+                        <button
+                          onClick={() => setSelectedAssetForAssign(asset)}
+                          className="w-8 h-8 flex items-center justify-center hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors group/assign border border-transparent hover:border-indigo-200"
+                          title="Assign Asset"
+                        >
+                          <UserPlus className="w-4 h-4 group-hover/assign:scale-110 transition-transform" />
+                        </button>
+                      )}
+                      <button
                         onClick={() => setSelectedAssetForQR(asset)}
                         className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-brand-primary rounded-lg transition-colors group/qr border border-transparent hover:border-slate-200"
                         title="Generate QR Tag"
@@ -233,7 +255,7 @@ const Assets = () => {
                         <QrCode className="w-4 h-4 group-hover/qr:scale-110 transition-transform" />
                       </button>
                       {canRequestTransfer(user?.role) && (
-                        <button 
+                        <button
                           onClick={() => setSelectedAssetForTransfer(asset)}
                           className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-brand-primary rounded-lg transition-colors group/transfer border border-transparent hover:border-slate-200"
                           title="Request Transfer"
@@ -241,7 +263,7 @@ const Assets = () => {
                           <ArrowRightLeft className="w-4 h-4 group-hover/transfer:scale-110 transition-transform" />
                         </button>
                       )}
-                      <button 
+                      <button
                         onClick={() => handleEdit(asset)}
                         className="text-[11px] font-bold text-brand-primary hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 group/btn"
                       >
@@ -310,6 +332,12 @@ const Assets = () => {
         isOpen={!!selectedAssetForTransfer}
         onClose={() => setSelectedAssetForTransfer(null)}
         asset={selectedAssetForTransfer}
+      />
+
+      <AssignAssetModal
+        isOpen={!!selectedAssetForAssign}
+        onClose={() => setSelectedAssetForAssign(null)}
+        asset={selectedAssetForAssign}
       />
     </motion.div>
   );

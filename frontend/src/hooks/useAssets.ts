@@ -51,6 +51,28 @@ export const useUpdateAsset = () => {
   });
 };
 
+export interface AssignAssetPayload {
+  user_id: number;
+  department_id: number;
+  assignment_date: string;
+  return_date?: string | null;
+}
+
+export const useAssignAsset = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assetId, data }: { assetId: number; data: AssignAssetPayload }) => {
+      const response = await api.post(`/assets/${assetId}/assign`, data);
+      return response.data;
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      queryClient.invalidateQueries({ queryKey: ['asset', variables.assetId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+};
+
 export const useBulkImportAssets = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -81,3 +103,5 @@ export const useAssetTransition = () => {
     },
   });
 };
+
+
