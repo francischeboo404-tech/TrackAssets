@@ -77,6 +77,10 @@ export function canAssignAsset(role?: string): boolean {
   return canAccess(role, ['store_manager', 'dept_head']);
 }
 
+export function canReturnAsset(role?: string): boolean {
+  return canAccess(role, ['store_manager', 'dept_head']);
+}
+
 export function canCreateAsset(role?: string): boolean {
   return canAccess(role, ['staff', 'store_manager']);
 }

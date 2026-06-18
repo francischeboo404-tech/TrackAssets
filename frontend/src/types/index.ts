@@ -39,6 +39,7 @@ export interface Asset {
   assigned_department_id?: number;
   assignment_date?: string;
   return_date?: string;
+  actual_return_date?: string;
   condition: 'new' | 'good' | 'fair' | 'repair' | 'condemned';
   purchase_date: string;
   purchase_value: number;

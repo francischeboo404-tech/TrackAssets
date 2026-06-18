@@ -458,6 +458,74 @@ class AssetService:
         )
         return asset_obj
 
+    _RETURN_CONDITION_MAP = {
+        "good":    ("available", "good"),
+        "damaged": ("damaged",   "repair"),
+        "lost":    ("lost",      "condemned"),
+    }
+
+    @transaction_retry(max_retries=3)
+    def return_asset(self, asset_id, org_id, data, current_user_role=None):
+        from app.models.asset import Asset
+
+        asset_obj = (
+            Asset.query.with_for_update()
+            .filter_by(id=asset_id, organisation_id=org_id)
+            .first()
+        )
+        if not asset_obj:
+            raise NotFoundError("Asset not found")
+
+        if asset_obj.status != "assigned":
+            raise ValidationError(
+                f"Cannot return asset with status '{asset_obj.status}' — asset must be assigned"
+            )
+
+        new_status, new_condition = self._RETURN_CONDITION_MAP[data["return_condition"]]
+
+        if current_user_role:
+            assert_can_transition_status(current_user_role, "assigned", new_status)
+
+        old_values = {
+            "status": asset_obj.status,
+            "condition": asset_obj.condition,
+            "assigned_to": asset_obj.assigned_to,
+            "assigned_to_user_id": asset_obj.assigned_to_user_id,
+            "assignment_date": str(asset_obj.assignment_date) if asset_obj.assignment_date else None,
+        }
+
+        asset_obj.status = new_status
+        asset_obj.condition = new_condition
+        asset_obj.actual_return_date = data["actual_return_date"]
+        asset_obj.assigned_to = None
+        asset_obj.assigned_to_user_id = None
+        asset_obj.assigned_department_id = None
+        asset_obj.assignment_date = None
+        asset_obj.return_date = None
+        asset_obj.updated_at = db.func.now()
+
+        AuditService.log_asset_change(
+            asset_obj,
+            "ASSET_RETURNED",
+            old_values=old_values,
+            new_values={
+                "status": new_status,
+                "condition": new_condition,
+                "return_condition": data["return_condition"],
+                "actual_return_date": str(data["actual_return_date"]),
+                "notes": data.get("notes"),
+            },
+            session=self.session,
+        )
+        self.session.commit()
+
+        event_bus.publish(
+            "ASSET_STATUS_CHANGED",
+            {"asset_id": asset_obj.id, "status": new_status, "source": "return"},
+            organisation_id=org_id,
+        )
+        return asset_obj
+
     def stats(self, org_id):
         """Get asset statistics from repository"""
         return self.repo.stats(org_id)

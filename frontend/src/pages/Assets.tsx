@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload, UserPlus, UserCheck } from 'lucide-react';
+import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload, UserPlus, UserCheck, CornerDownLeft } from 'lucide-react';
 import { useAssets } from '../hooks/useAssets';
 import { AssetLifecycleActions } from '../components/ui/AssetLifecycleActions';
-import { canCreateAsset, canEditAsset, canRequestTransfer, canAssignAsset } from '../lib/permissions';
+import { canCreateAsset, canEditAsset, canRequestTransfer, canAssignAsset, canReturnAsset } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { AssetModal } from '../components/ui/AssetModal';
 import { BulkImportModal } from '../components/ui/BulkImportModal';
@@ -11,6 +11,7 @@ import { AssetQRCode } from '../components/ui/AssetQRCode';
 import { Modal } from '../components/ui/Modal';
 import { TransferRequestModal } from '../components/ui/TransferRequestModal';
 import { AssignAssetModal } from '../components/ui/AssignAssetModal';
+import { ReturnAssetModal } from '../components/ui/ReturnAssetModal';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -34,6 +35,7 @@ const Assets = () => {
   const [selectedAssetForQR, setSelectedAssetForQR] = useState<any>(null);
   const [selectedAssetForTransfer, setSelectedAssetForTransfer] = useState<any>(null);
   const [selectedAssetForAssign, setSelectedAssetForAssign] = useState<any>(null);
+  const [selectedAssetForReturn, setSelectedAssetForReturn] = useState<any>(null);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -247,6 +249,15 @@ const Assets = () => {
                           <UserPlus className="w-4 h-4 group-hover/assign:scale-110 transition-transform" />
                         </button>
                       )}
+                      {canReturnAsset(user?.role) && asset.status === 'assigned' && (
+                        <button
+                          onClick={() => setSelectedAssetForReturn(asset)}
+                          className="w-8 h-8 flex items-center justify-center hover:bg-amber-50 text-slate-400 hover:text-amber-600 rounded-lg transition-colors group/return border border-transparent hover:border-amber-200"
+                          title="Record Return"
+                        >
+                          <CornerDownLeft className="w-4 h-4 group-hover/return:scale-110 transition-transform" />
+                        </button>
+                      )}
                       <button
                         onClick={() => setSelectedAssetForQR(asset)}
                         className="w-8 h-8 flex items-center justify-center hover:bg-slate-100 text-slate-400 hover:text-brand-primary rounded-lg transition-colors group/qr border border-transparent hover:border-slate-200"
@@ -338,6 +349,12 @@ const Assets = () => {
         isOpen={!!selectedAssetForAssign}
         onClose={() => setSelectedAssetForAssign(null)}
         asset={selectedAssetForAssign}
+      />
+
+      <ReturnAssetModal
+        isOpen={!!selectedAssetForReturn}
+        onClose={() => setSelectedAssetForReturn(null)}
+        asset={selectedAssetForReturn}
       />
     </motion.div>
   );

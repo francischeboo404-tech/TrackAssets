@@ -52,6 +52,7 @@ class Asset(db.Model):
     assigned_department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
     assignment_date = db.Column(db.Date, nullable=True)
     return_date = db.Column(db.Date, nullable=True)
+    actual_return_date = db.Column(db.Date, nullable=True)
     status = db.Column(
         db.String(50), nullable=False, default=AssetStatus.AVAILABLE.value
     )

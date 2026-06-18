@@ -20,6 +20,7 @@ from app.validation import (
     AssetSchema,
     AssetAssignSchema,
     AssetStatusUpdateSchema,
+    ReturnAssetSchema,
     validate_input,
     sanitize_string,
 )
@@ -86,6 +87,9 @@ def get_assets():
                         ),
                         "return_date": (
                             a.return_date.isoformat() if a.return_date else None
+                        ),
+                        "actual_return_date": (
+                            a.actual_return_date.isoformat() if a.actual_return_date else None
                         ),
                         "status": a.status,
                         "condition": a.condition,
@@ -154,6 +158,9 @@ def get_asset(asset_id):
                 ),
                 "return_date": (
                     asset_obj.return_date.isoformat() if asset_obj.return_date else None
+                ),
+                "actual_return_date": (
+                    asset_obj.actual_return_date.isoformat() if asset_obj.actual_return_date else None
                 ),
                 "status": asset_obj.status,
                 "condition": asset_obj.condition,
@@ -351,6 +358,47 @@ def assign_asset(asset_id):
 @assets_bp.route("/<int:asset_id>/assign", methods=["OPTIONS"])
 def assign_asset_options(asset_id):
     """CORS preflight for assigning an asset."""
+    return ('', 204)
+
+
+@assets_bp.route("/<int:asset_id>/return", methods=["POST"])
+@jwt_required_with_user
+@require_permission("assets:edit")
+@limiter.limit("30 per minute")
+def return_asset(asset_id):
+    """Record the return of an assigned asset, updating status and condition."""
+    data = request.get_json()
+    org_id = get_current_organisation_id()
+
+    validated_data, errors = validate_input(ReturnAssetSchema, data)
+    if errors:
+        raise ValidationError("Validation failed", errors)
+
+    asset_obj = asset_service.return_asset(
+        asset_id, org_id, validated_data, current_user_role=g.user.role
+    )
+
+    return (
+        jsonify(
+            {
+                "message": "Asset returned successfully",
+                "asset_id": asset_obj.id,
+                "status": asset_obj.status,
+                "condition": asset_obj.condition,
+                "actual_return_date": (
+                    asset_obj.actual_return_date.isoformat()
+                    if asset_obj.actual_return_date
+                    else None
+                ),
+            }
+        ),
+        200,
+    )
+
+
+@assets_bp.route("/<int:asset_id>/return", methods=["OPTIONS"])
+def return_asset_options(asset_id):
+    """CORS preflight for returning an asset."""
     return ('', 204)
 
 

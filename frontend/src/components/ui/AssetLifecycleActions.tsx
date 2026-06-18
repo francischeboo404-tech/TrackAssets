@@ -19,7 +19,7 @@ const ACTION_CONFIG: Record<
 // "assigned" is intentionally excluded — that transition goes through the AssignAssetModal
 const NEXT_BY_STATUS: Record<string, string[]> = {
   available: ['under_maintenance', 'lost', 'damaged', 'disposed'],
-  assigned: ['available', 'under_maintenance', 'lost', 'damaged', 'disposed'],
+  assigned: ['under_maintenance', 'lost', 'damaged', 'disposed'],
   under_maintenance: ['available', 'disposed'],
   lost: ['available', 'disposed'],
   damaged: ['under_maintenance', 'disposed'],

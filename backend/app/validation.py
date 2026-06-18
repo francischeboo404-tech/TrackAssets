@@ -176,6 +176,15 @@ class AssetAssignSchema(Schema):
     return_date = fields.Date(load_default=None, allow_none=True)
 
 
+class ReturnAssetSchema(Schema):
+    return_condition = fields.Str(
+        required=True,
+        validate=validate.OneOf(["good", "damaged", "lost"]),
+    )
+    actual_return_date = fields.Date(required=True)
+    notes = fields.Str(validate=validate.Length(max=1000), allow_none=True)
+
+
 class TransferRequestSchema(Schema):
     item_type = fields.Str(validate=validate.OneOf(["asset", "inventory"]), missing="asset")
     asset_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
