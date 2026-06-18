@@ -83,7 +83,12 @@ class Department(db.Model):
         db.Index("ix_departments_active", "is_active"),
     )
 
-    assets = db.relationship("Asset", backref="department", lazy=True)
+    assets = db.relationship(
+        "Asset",
+        foreign_keys="[Asset.department_id]",
+        backref="department",
+        lazy=True,
+    )
     head = db.relationship(
         "User", backref="headed_departments", foreign_keys=[head_id]
     )
