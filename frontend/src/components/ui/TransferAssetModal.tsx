@@ -89,6 +89,7 @@ export const TransferAssetModal: React.FC<TransferAssetModalProps> = ({ isOpen, 
     const payload: TransferRequestPayload = {
       transfer_type: transferType,
       asset_id: asset.id,
+      item_type: 'asset',
       comment: comment.trim(),
     };
 

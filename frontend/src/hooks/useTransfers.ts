@@ -23,6 +23,7 @@ export interface TransferRequest {
 export interface TransferRequestPayload {
   transfer_type: 'employee_to_employee' | 'department_to_department' | 'warehouse_to_warehouse';
   asset_id: number;
+  item_type?: 'asset' | 'inventory';
   to_user_id?: number;
   new_department_id?: number;
   to_warehouse_id?: number;

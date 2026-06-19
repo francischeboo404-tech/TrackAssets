@@ -203,8 +203,8 @@ class TransferRequestSchema(Schema):
     # Required for employee_to_employee
     to_user_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     new_location = fields.Str(validate=validate.Length(max=255), allow_none=True)
-    to_warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
-    to_bin_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    to_warehouse_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
+    to_bin_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     from_warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     comment = fields.Str(validate=validate.Length(max=1000), allow_none=True)
 
