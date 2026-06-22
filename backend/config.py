@@ -2,9 +2,10 @@ import os
 import re
 from datetime import timedelta
 from urllib.parse import quote_plus, urlparse, urlunparse
+from typing import Optional
 
 
-def normalize_supabase_database_url(url: str | None) -> str | None:
+def normalize_supabase_database_url(url: Optional[str]) -> Optional[str]:
     """Use Supabase pooler for cloud hosts (Render cannot reach direct db.* IPv6).
 
     Direct: postgresql://postgres:PASS@db.PROJECT.supabase.co:5432/postgres
@@ -38,7 +39,7 @@ def normalize_supabase_database_url(url: str | None) -> str | None:
     )
 
 
-def _postgres_engine_options(db_url: str | None) -> dict:
+def _postgres_engine_options(db_url: Optional[str]) -> dict:
     options = {"pool_pre_ping": True}
     if db_url and db_url.startswith("postgresql://"):
         options["client_encoding"] = "utf8"
