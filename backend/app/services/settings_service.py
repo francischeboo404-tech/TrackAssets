@@ -1,7 +1,7 @@
 """Organization settings business logic."""
 
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from flask import current_app
 from werkzeug.utils import secure_filename
@@ -35,8 +35,7 @@ class SettingsService:
     @staticmethod
     def get_organization(org_id: int):
         from app.models.organization import Organization
-
-        org = Organization.query.get(org_id)
+        org = db.session.get(Organization, org_id)
         if not org:
             raise NotFoundError("Organization not found")
         return org
@@ -113,9 +112,15 @@ class SettingsService:
             raise ValidationError("Logo file must be 2MB or smaller")
 
         unique_filename = f"{org.code}_{os.urandom(4).hex()}_{filename}"
-        upload_folder = os.path.join(
-            current_app.root_path, "static", "uploads", "logos"
-        )
+        
+        # Use /tmp on Vercel to avoid read-only filesystem error
+        if os.environ.get("VERCEL") == "1":
+            upload_folder = "/tmp/uploads/logos"
+        else:
+            upload_folder = os.path.join(
+                current_app.root_path, "static", "uploads", "logos"
+            )
+            
         os.makedirs(upload_folder, exist_ok=True)
         filepath = os.path.join(upload_folder, unique_filename)
         file_storage.save(filepath)
@@ -221,7 +226,7 @@ class SettingsService:
 
     @staticmethod
     def purge_old_movements(org_id: int) -> int:
-        cutoff = datetime.utcnow() - timedelta(days=3 * 365)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3 * 365)
         items = InventoryItem.query.filter_by(organisation_id=org_id).all()
         item_ids = [i.id for i in items]
         deleted = 0
