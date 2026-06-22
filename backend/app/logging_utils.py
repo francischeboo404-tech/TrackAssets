@@ -21,6 +21,16 @@ def configure_logging(app):
     if app.debug or app.testing:
         return
 
+    # Skip file logging in Vercel to avoid read-only filesystem crash
+    if os.environ.get("VERCEL") == "1":
+        import sys
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(logging.INFO)
+        app.logger.addHandler(stream_handler)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info("TrackIT Management System startup (Vercel Mode)")
+        return
+
     if not os.path.exists("logs"):
         os.mkdir("logs")
 

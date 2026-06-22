@@ -36,6 +36,14 @@ def create_app(config_name=None):
 
     app.config.from_object(config_by_name[config_name])
 
+    # Provide a safe fallback DB URI when running in environments where a
+    # production DATABASE_URL is not set (tests and quick local checks).
+    # Flask-SQLAlchemy 3.x raises if no URI or binds are configured, so set
+    # an innocuous sqlite file path to allow app initialization without mutating
+    # other runtime behavior when a DB is intentionally configured.
+    if not app.config.get("SQLALCHEMY_DATABASE_URI") and not app.config.get("SQLALCHEMY_BINDS"):
+        app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL") or "sqlite:///trackit_dev.db"
+
     db.init_app(app)
     
     # Configure SQLite to use WAL mode and busy timeout to prevent "database is locked" errors
@@ -131,6 +139,11 @@ def create_app(config_name=None):
         search_bp = _import_bp("search")
 
         users_bp = _import_bp("users")
+        procurement_bp = _import_bp("procurement")
+        receiving_bp = _import_bp("receiving")
+        requisition_bp = _import_bp("requisition")
+        disposal_bp = _import_bp("disposal")
+        ledger_bp = _import_bp("ledger")
 
         app.register_blueprint(users_bp, url_prefix="/api/users")
 
@@ -147,13 +160,21 @@ def create_app(config_name=None):
         app.register_blueprint(reports_bp, url_prefix="/api/reports")
         app.register_blueprint(settings_bp, url_prefix="/api/settings")
         app.register_blueprint(search_bp, url_prefix="/api/search")
-
+        app.register_blueprint(procurement_bp, url_prefix="/api/procurement")
+        app.register_blueprint(receiving_bp, url_prefix="/api/receiving")
+        app.register_blueprint(requisition_bp, url_prefix="/api/requisition")
+        app.register_blueprint(disposal_bp, url_prefix="/api/disposal")
+        app.register_blueprint(ledger_bp, url_prefix="/api/ledger")
         @app.route("/static/uploads/logos/<path:filename>")
         def serve_org_logo(filename):
             """Serve organization logo uploads."""
             from flask import send_from_directory
 
-            directory = _os.path.join(app.root_path, "static", "uploads", "logos")
+            if os.environ.get("VERCEL") == "1":
+                directory = "/tmp/uploads/logos"
+            else:
+                directory = _os.path.join(app.root_path, "static", "uploads", "logos")
+                
             return send_from_directory(directory, filename)
 
         # Health check
