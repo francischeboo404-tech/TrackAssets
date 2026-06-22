@@ -1,4 +1,4 @@
-import { Check, X, UserCheck, Wrench, Trash2, RotateCcw } from 'lucide-react';
+import { Check, AlertTriangle, Wrench, Trash2, SearchX } from 'lucide-react';
 import { useAssetTransition } from '../../hooks/useAssets';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
@@ -9,20 +9,20 @@ const ACTION_CONFIG: Record<
   string,
   { label: string; icon: typeof Check; className: string }
 > = {
-  approved: { label: 'Approve', icon: Check, className: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100' },
-  rejected: { label: 'Reject', icon: X, className: 'bg-rose-50 text-rose-700 hover:bg-rose-100' },
-  in_use: { label: 'Mark In Use', icon: UserCheck, className: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' },
-  maintenance: { label: 'Send to Maintenance', icon: Wrench, className: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
+  available: { label: 'Mark Available', icon: Check, className: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' },
+  under_maintenance: { label: 'Send to Maintenance', icon: Wrench, className: 'bg-amber-50 text-amber-700 hover:bg-amber-100' },
+  lost: { label: 'Mark Lost', icon: SearchX, className: 'bg-rose-50 text-rose-700 hover:bg-rose-100' },
+  damaged: { label: 'Mark Damaged', icon: AlertTriangle, className: 'bg-orange-50 text-orange-700 hover:bg-orange-100' },
   disposed: { label: 'Dispose', icon: Trash2, className: 'bg-slate-100 text-slate-700 hover:bg-slate-200' },
-  requested: { label: 'Re-request', icon: RotateCcw, className: 'bg-sky-50 text-sky-700 hover:bg-sky-100' },
 };
 
+// "assigned" is intentionally excluded — that transition goes through the AssignAssetModal
 const NEXT_BY_STATUS: Record<string, string[]> = {
-  requested: ['approved', 'rejected'],
-  rejected: ['requested'],
-  approved: ['in_use'],
-  in_use: ['maintenance', 'disposed'],
-  maintenance: ['in_use', 'disposed'],
+  available: ['under_maintenance', 'lost', 'damaged', 'disposed'],
+  assigned: ['under_maintenance', 'lost', 'damaged', 'disposed'],
+  under_maintenance: ['available', 'disposed'],
+  lost: ['available', 'disposed'],
+  damaged: ['under_maintenance', 'disposed'],
 };
 
 interface AssetLifecycleActionsProps {
@@ -52,7 +52,7 @@ export const AssetLifecycleActions: React.FC<AssetLifecycleActionsProps> = ({
   const handleTransition = async (status: string) => {
     try {
       await transition.mutateAsync({ id: assetId, status });
-      addToast('success', 'Status Updated', `Asset is now ${status.replace('_', ' ')}.`);
+      addToast('success', 'Status Updated', `Asset is now ${status.replace(/_/g, ' ')}.`);
       onSuccess?.();
     } catch (err: any) {
       const msg =

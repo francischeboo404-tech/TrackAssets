@@ -1,6 +1,6 @@
 import re
 
-from marshmallow import EXCLUDE, Schema, ValidationError, fields, pre_load, validate
+from marshmallow import EXCLUDE, Schema, ValidationError, fields, pre_load, validate, validates_schema
 
 
 class UserRegistrationSchema(Schema):
@@ -157,11 +157,11 @@ class AssetStatusUpdateSchema(Schema):
         required=True,
         validate=validate.OneOf(
             [
-                "requested",
-                "approved",
-                "rejected",
-                "in_use",
-                "maintenance",
+                "available",
+                "assigned",
+                "under_maintenance",
+                "lost",
+                "damaged",
                 "disposed",
             ]
         ),
@@ -169,19 +169,57 @@ class AssetStatusUpdateSchema(Schema):
     comments = fields.Str(validate=validate.Length(max=1000), allow_none=True)
 
 
+class AssetAssignSchema(Schema):
+    user_id = fields.Int(required=True, validate=validate.Range(min=1))
+    department_id = fields.Int(required=True, validate=validate.Range(min=1))
+    assignment_date = fields.Date(required=True)
+    return_date = fields.Date(load_default=None, allow_none=True)
+
+
+class ReturnAssetSchema(Schema):
+    return_condition = fields.Str(
+        required=True,
+        validate=validate.OneOf(["good", "damaged", "lost"]),
+    )
+    actual_return_date = fields.Date(required=True)
+    notes = fields.Str(validate=validate.Length(max=1000), allow_none=True)
+
+
 class TransferRequestSchema(Schema):
+    transfer_type = fields.Str(
+        required=True,
+        validate=validate.OneOf([
+            "employee_to_employee",
+            "department_to_department",
+            "warehouse_to_warehouse",
+        ]),
+    )
     item_type = fields.Str(validate=validate.OneOf(["asset", "inventory"]), missing="asset")
     asset_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     inventory_item_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     quantity = fields.Int(validate=validate.Range(min=1), missing=1)
-    new_department_id = fields.Int(
-        required=True, validate=validate.Range(min=1)
-    )
+    # Required for department_to_department (and inventory transfers)
+    new_department_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
+    # Required for employee_to_employee
+    to_user_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     new_location = fields.Str(validate=validate.Length(max=255), allow_none=True)
-    to_warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
-    to_bin_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    to_warehouse_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
+    to_bin_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     from_warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     comment = fields.Str(validate=validate.Length(max=1000), allow_none=True)
+
+    @validates_schema
+    def validate_type_fields(self, data, **kwargs):
+        transfer_type = data.get("transfer_type")
+        errors = {}
+        if transfer_type == "employee_to_employee" and not data.get("to_user_id"):
+            errors["to_user_id"] = ["Required for employee-to-employee transfers"]
+        if transfer_type == "department_to_department" and not data.get("new_department_id"):
+            errors["new_department_id"] = ["Required for department-to-department transfers"]
+        if transfer_type == "warehouse_to_warehouse" and not data.get("to_warehouse_id"):
+            errors["to_warehouse_id"] = ["Required for warehouse-to-warehouse transfers"]
+        if errors:
+            raise ValidationError(errors)
 
 
 class TransferReviewSchema(Schema):

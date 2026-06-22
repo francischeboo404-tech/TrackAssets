@@ -3,6 +3,14 @@ from datetime import datetime
 from app import db
 
 
+class TransferType:
+    EMPLOYEE_TO_EMPLOYEE = "employee_to_employee"
+    DEPARTMENT_TO_DEPARTMENT = "department_to_department"
+    WAREHOUSE_TO_WAREHOUSE = "warehouse_to_warehouse"
+
+    ALL = [EMPLOYEE_TO_EMPLOYEE, DEPARTMENT_TO_DEPARTMENT, WAREHOUSE_TO_WAREHOUSE]
+
+
 class TransferRequest(db.Model):
     """Transfer request model for assets requiring approval."""
 
@@ -39,6 +47,16 @@ class TransferRequest(db.Model):
     requested_at = db.Column(db.DateTime, default=datetime.utcnow)
     reviewed_at = db.Column(db.DateTime)
 
+    # Transfer type fields
+    transfer_type = db.Column(
+        db.String(50), nullable=False, default=TransferType.DEPARTMENT_TO_DEPARTMENT
+    )
+    from_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    to_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    from_warehouse_id = db.Column(
+        db.Integer, db.ForeignKey("warehouses.id"), nullable=True
+    )
+
     __table_args__ = (
         db.Index("ix_transfer_requests_org_id", "organisation_id"),
         db.Index("ix_transfer_requests_asset_id", "asset_id"),
@@ -49,6 +67,7 @@ class TransferRequest(db.Model):
         db.Index("ix_transfer_requests_from_dept", "from_department_id"),
         db.Index("ix_transfer_requests_to_dept", "to_department_id"),
         db.Index("ix_transfer_requests_requested_at", "requested_at"),
+        db.Index("ix_transfer_requests_transfer_type", "transfer_type"),
     )
 
     asset = db.relationship(
@@ -65,8 +84,11 @@ class TransferRequest(db.Model):
     to_department = db.relationship(
         "Department", foreign_keys=[to_department_id]
     )
+    from_user = db.relationship("User", foreign_keys=[from_user_id])
+    to_user = db.relationship("User", foreign_keys=[to_user_id])
 
     def __repr__(self):
         return (
-            f"<TransferRequest asset_id={self.asset_id} status={self.status}>"
+            f"<TransferRequest asset_id={self.asset_id} "
+            f"type={self.transfer_type} status={self.status}>"
         )

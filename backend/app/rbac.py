@@ -17,25 +17,43 @@ PRIVILEGED_ROLES = frozenset({"admin", "superadmin"})
 
 # (from_status, to_status) → roles allowed (excluding privileged bypass)
 STATUS_TRANSITION_ROLES = {
-    ("requested", "approved"): frozenset({"dept_head"}),
-    ("requested", "rejected"): frozenset({"dept_head"}),
-    ("rejected", "requested"): frozenset({"staff", "dept_head"}),
-    ("approved", "in_use"): frozenset({"staff", "store_manager"}),
-    ("in_use", "maintenance"): frozenset({"staff", "store_manager"}),
-    ("maintenance", "in_use"): frozenset({"staff", "store_manager"}),
-    ("in_use", "disposed"): frozenset(),  # admin only (privileged)
-    ("maintenance", "disposed"): frozenset(),  # admin only (privileged)
+    ("available", "assigned"): frozenset({"store_manager", "dept_head"}),
+    ("assigned", "available"): frozenset({"store_manager", "dept_head"}),
+    ("available", "under_maintenance"): frozenset({"staff", "store_manager"}),
+    ("assigned", "under_maintenance"): frozenset({"staff", "store_manager"}),
+    ("under_maintenance", "available"): frozenset({"staff", "store_manager"}),
+    ("under_maintenance", "assigned"): frozenset({"staff", "store_manager"}),
+    ("available", "lost"): frozenset({"store_manager"}),
+    ("assigned", "lost"): frozenset({"store_manager"}),
+    ("available", "damaged"): frozenset({"store_manager"}),
+    ("assigned", "damaged"): frozenset({"store_manager"}),
+    ("lost", "available"): frozenset({"store_manager"}),
+    ("damaged", "under_maintenance"): frozenset({"staff", "store_manager"}),
+    ("available", "disposed"): frozenset(),     # admin only (privileged)
+    ("assigned", "disposed"): frozenset(),      # admin only (privileged)
+    ("under_maintenance", "disposed"): frozenset(),  # admin only (privileged)
+    ("lost", "disposed"): frozenset(),          # admin only (privileged)
+    ("damaged", "disposed"): frozenset(),       # admin only (privileged)
 }
 
 ACTION_LABELS = {
-    ("requested", "approved"): "approve",
-    ("requested", "rejected"): "reject",
-    ("approved", "in_use"): "assign",
-    ("in_use", "maintenance"): "maintenance",
-    ("maintenance", "in_use"): "return_to_use",
-    ("in_use", "disposed"): "dispose",
-    ("maintenance", "disposed"): "dispose",
-    ("rejected", "requested"): "re_request",
+    ("available", "assigned"): "assign",
+    ("assigned", "available"): "unassign",
+    ("available", "under_maintenance"): "send_to_maintenance",
+    ("assigned", "under_maintenance"): "send_to_maintenance",
+    ("under_maintenance", "available"): "mark_available",
+    ("under_maintenance", "assigned"): "reassign",
+    ("available", "lost"): "mark_lost",
+    ("assigned", "lost"): "mark_lost",
+    ("available", "damaged"): "mark_damaged",
+    ("assigned", "damaged"): "mark_damaged",
+    ("lost", "available"): "mark_found",
+    ("damaged", "under_maintenance"): "send_to_maintenance",
+    ("available", "disposed"): "dispose",
+    ("assigned", "disposed"): "dispose",
+    ("under_maintenance", "disposed"): "dispose",
+    ("lost", "disposed"): "dispose",
+    ("damaged", "disposed"): "dispose",
 }
 
 
@@ -67,7 +85,7 @@ def can_transition_status(role: str, from_status: str, to_status: str) -> bool:
         return False
 
     if to_status == "disposed":
-        return False
+        return False  # Only privileged roles can dispose
 
     return role in allowed
 
@@ -87,11 +105,11 @@ def get_available_transitions(role: str, current_status: str) -> list[dict]:
     asset.status = current_status
     options = []
     for target in (
-        "approved",
-        "rejected",
-        "requested",
-        "in_use",
-        "maintenance",
+        "available",
+        "assigned",
+        "under_maintenance",
+        "lost",
+        "damaged",
         "disposed",
     ):
         if not asset.can_transition_to(target):

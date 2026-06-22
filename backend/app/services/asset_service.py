@@ -296,6 +296,13 @@ class AssetService:
         elif new_status == "disposed":
             raise AuthorizationError("Only admins can dispose assets")
         asset_obj.status = new_status
+        # Clear assignment fields when un-assigning
+        if old_status == "assigned" and new_status != "assigned":
+            asset_obj.assigned_to_user_id = None
+            asset_obj.assigned_department_id = None
+            asset_obj.assignment_date = None
+            asset_obj.return_date = None
+            asset_obj.assigned_to = None
         asset_obj.updated_at = db.func.now()
         AuditService.log_asset_change(
             asset_obj,
@@ -315,9 +322,9 @@ class AssetService:
         if not asset_obj:
             raise NotFoundError("Asset not found")
 
-        if asset_obj.status in ["in_use", "maintenance"]:
+        if asset_obj.status in ["assigned", "under_maintenance"]:
             raise ConflictError(
-                "Cannot delete asset that is in use or under maintenance"
+                "Cannot delete asset that is assigned or under maintenance"
             )
 
         # store audit data before delete
@@ -386,6 +393,138 @@ class AssetService:
         event_bus.publish("ASSET_DELETED", {"asset_id": asset_id}, organisation_id=org_id)
         
         return True
+
+    @transaction_retry(max_retries=3)
+    def assign_asset(self, asset_id, org_id, data, acting_user_id=None):
+        from app.models.asset import Asset
+        from app.models.user import User
+
+        asset_obj = (
+            Asset.query.with_for_update()
+            .filter_by(id=asset_id, organisation_id=org_id)
+            .first()
+        )
+        if not asset_obj:
+            raise NotFoundError("Asset not found")
+
+        if not asset_obj.can_transition_to("assigned"):
+            raise ValidationError(
+                f"Cannot assign asset with status '{asset_obj.status}'"
+            )
+
+        assignee = User.query.filter_by(
+            id=data["user_id"], organisation_id=org_id
+        ).first()
+        if not assignee:
+            raise NotFoundError("User not found")
+
+        dept = organization.Department.query.filter_by(
+            id=data["department_id"], organisation_id=org_id
+        ).first()
+        if not dept:
+            raise NotFoundError("Department not found")
+
+        old_status = asset_obj.status
+        full_name = f"{assignee.first_name or ''} {assignee.last_name or ''}".strip() or assignee.username
+
+        asset_obj.assigned_to_user_id = assignee.id
+        asset_obj.assigned_department_id = dept.id
+        asset_obj.assignment_date = data["assignment_date"]
+        asset_obj.return_date = data.get("return_date")
+        asset_obj.assigned_to = full_name
+        asset_obj.status = "assigned"
+        asset_obj.updated_at = db.func.now()
+
+        AuditService.log_asset_change(
+            asset_obj,
+            "ASSET_ASSIGNED",
+            old_values={"status": old_status, "assigned_to": None},
+            new_values={
+                "status": "assigned",
+                "assigned_to": full_name,
+                "assigned_to_user_id": assignee.id,
+                "assigned_department_id": dept.id,
+                "assignment_date": str(data["assignment_date"]),
+                "return_date": str(data.get("return_date")) if data.get("return_date") else None,
+            },
+            session=self.session,
+        )
+        self.session.commit()
+
+        event_bus.publish(
+            "ASSET_STATUS_CHANGED",
+            {"asset_id": asset_obj.id, "status": "assigned"},
+            organisation_id=org_id,
+        )
+        return asset_obj
+
+    _RETURN_CONDITION_MAP = {
+        "good":    ("available", "good"),
+        "damaged": ("damaged",   "repair"),
+        "lost":    ("lost",      "condemned"),
+    }
+
+    @transaction_retry(max_retries=3)
+    def return_asset(self, asset_id, org_id, data, current_user_role=None):
+        from app.models.asset import Asset
+
+        asset_obj = (
+            Asset.query.with_for_update()
+            .filter_by(id=asset_id, organisation_id=org_id)
+            .first()
+        )
+        if not asset_obj:
+            raise NotFoundError("Asset not found")
+
+        if asset_obj.status != "assigned":
+            raise ValidationError(
+                f"Cannot return asset with status '{asset_obj.status}' — asset must be assigned"
+            )
+
+        new_status, new_condition = self._RETURN_CONDITION_MAP[data["return_condition"]]
+
+        if current_user_role:
+            assert_can_transition_status(current_user_role, "assigned", new_status)
+
+        old_values = {
+            "status": asset_obj.status,
+            "condition": asset_obj.condition,
+            "assigned_to": asset_obj.assigned_to,
+            "assigned_to_user_id": asset_obj.assigned_to_user_id,
+            "assignment_date": str(asset_obj.assignment_date) if asset_obj.assignment_date else None,
+        }
+
+        asset_obj.status = new_status
+        asset_obj.condition = new_condition
+        asset_obj.actual_return_date = data["actual_return_date"]
+        asset_obj.assigned_to = None
+        asset_obj.assigned_to_user_id = None
+        asset_obj.assigned_department_id = None
+        asset_obj.assignment_date = None
+        asset_obj.return_date = None
+        asset_obj.updated_at = db.func.now()
+
+        AuditService.log_asset_change(
+            asset_obj,
+            "ASSET_RETURNED",
+            old_values=old_values,
+            new_values={
+                "status": new_status,
+                "condition": new_condition,
+                "return_condition": data["return_condition"],
+                "actual_return_date": str(data["actual_return_date"]),
+                "notes": data.get("notes"),
+            },
+            session=self.session,
+        )
+        self.session.commit()
+
+        event_bus.publish(
+            "ASSET_STATUS_CHANGED",
+            {"asset_id": asset_obj.id, "status": new_status, "source": "return"},
+            organisation_id=org_id,
+        )
+        return asset_obj
 
     def stats(self, org_id):
         """Get asset statistics from repository"""

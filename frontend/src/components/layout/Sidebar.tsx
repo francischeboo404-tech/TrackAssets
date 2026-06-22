@@ -90,7 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
           const labels: Record<string, string> = {
             '/': 'Operational Overview',
             '/inventory': 'Stock Control',
-            '/assets': 'Asset Ledger',
+            '/assets': 'Asset Management',
             '/transfers': 'Movement Requests',
             '/warehouses': 'Storage Facilities',
             '/tracking': 'Live Tracking'

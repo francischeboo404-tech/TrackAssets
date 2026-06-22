@@ -7,11 +7,11 @@ from app import db
 class AssetStatus(Enum):
     """Asset status enumeration"""
 
-    REQUESTED = "requested"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    IN_USE = "in_use"
-    MAINTENANCE = "maintenance"
+    AVAILABLE = "available"
+    ASSIGNED = "assigned"
+    UNDER_MAINTENANCE = "under_maintenance"
+    LOST = "lost"
+    DAMAGED = "damaged"
     DISPOSED = "disposed"
 
 
@@ -48,8 +48,13 @@ class Asset(db.Model):
         db.Integer, db.ForeignKey("departments.id"), nullable=False
     )
     assigned_to = db.Column(db.String(255))
+    assigned_to_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    assigned_department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
+    assignment_date = db.Column(db.Date, nullable=True)
+    return_date = db.Column(db.Date, nullable=True)
+    actual_return_date = db.Column(db.Date, nullable=True)
     status = db.Column(
-        db.String(50), nullable=False, default=AssetStatus.REQUESTED.value
+        db.String(50), nullable=False, default=AssetStatus.AVAILABLE.value
     )
     condition = db.Column(
         db.String(50), nullable=False, default=AssetCondition.NEW.value
@@ -90,6 +95,12 @@ class Asset(db.Model):
         db.Index("ix_assets_serial_number", "serial_number"),
     )
 
+    assigned_user = db.relationship(
+        "User",
+        foreign_keys=[assigned_to_user_id],
+        lazy="joined",
+    )
+
     audit_logs = db.relationship(
         "AssetAuditLog",
         backref="asset",
@@ -113,23 +124,34 @@ class Asset(db.Model):
         new = new_status if isinstance(new_status, str) else new_status.value
 
         allowed_transitions = {
-            AssetStatus.REQUESTED.value: [
-                AssetStatus.APPROVED.value,
-                AssetStatus.REJECTED.value,
-            ],
-            AssetStatus.APPROVED.value: [AssetStatus.IN_USE.value],
-            AssetStatus.IN_USE.value: [
-                AssetStatus.MAINTENANCE.value,
+            AssetStatus.AVAILABLE.value: [
+                AssetStatus.ASSIGNED.value,
+                AssetStatus.UNDER_MAINTENANCE.value,
+                AssetStatus.LOST.value,
+                AssetStatus.DAMAGED.value,
                 AssetStatus.DISPOSED.value,
             ],
-            AssetStatus.MAINTENANCE.value: [
-                AssetStatus.IN_USE.value,
+            AssetStatus.ASSIGNED.value: [
+                AssetStatus.AVAILABLE.value,
+                AssetStatus.UNDER_MAINTENANCE.value,
+                AssetStatus.LOST.value,
+                AssetStatus.DAMAGED.value,
                 AssetStatus.DISPOSED.value,
             ],
-            AssetStatus.REJECTED.value: [
-                AssetStatus.REQUESTED.value
-            ],  # Allow re-requesting
-            AssetStatus.DISPOSED.value: [],  # Final state
+            AssetStatus.UNDER_MAINTENANCE.value: [
+                AssetStatus.AVAILABLE.value,
+                AssetStatus.ASSIGNED.value,
+                AssetStatus.DISPOSED.value,
+            ],
+            AssetStatus.LOST.value: [
+                AssetStatus.AVAILABLE.value,
+                AssetStatus.DISPOSED.value,
+            ],
+            AssetStatus.DAMAGED.value: [
+                AssetStatus.UNDER_MAINTENANCE.value,
+                AssetStatus.DISPOSED.value,
+            ],
+            AssetStatus.DISPOSED.value: [],  # Terminal state
         }
 
         return new in allowed_transitions.get(current, [])

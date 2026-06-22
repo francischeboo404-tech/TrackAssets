@@ -2,12 +2,14 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { useLiveTracking } from '../context/LiveTrackingContext';
 import { baseWithApi } from '../services/api';
 
 export const useSSE = () => {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
   const { user } = useAuth();
+  const { updatePosition } = useLiveTracking();
 
   useEffect(() => {
     if (!user) return; // Only connect if authenticated
@@ -47,6 +49,17 @@ export const useSSE = () => {
             queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
             queryClient.invalidateQueries({ queryKey: ['dashboard-movements'] });
             addToast('info', 'Real-time Scan', `New activity detected for ${payload.data.type} #${payload.data.item_id}`);
+            if (payload.data.lat && payload.data.lon) {
+              updatePosition({
+                item_type: payload.data.type,
+                item_id: payload.data.item_id,
+                lat: payload.data.lat,
+                lon: payload.data.lon,
+                action: payload.data.action,
+                timestamp: payload.data.timestamp,
+                warehouse_id: payload.data.warehouse_id,
+              });
+            }
             break;
           case 'AUDIT_CREATED':
             queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
@@ -91,5 +104,5 @@ export const useSSE = () => {
     return () => {
       eventSource.close();
     };
-  }, [queryClient, addToast]);
+  }, [queryClient, addToast, updatePosition]);
 };

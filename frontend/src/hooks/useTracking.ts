@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
+import type { LivePosition } from '../context/LiveTrackingContext';
 
 export interface ScanEventRecord {
   id: number;
@@ -92,6 +93,17 @@ export const useRecordScan = () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
     },
+  });
+};
+
+export const useLivePositions = () => {
+  return useQuery({
+    queryKey: ['live-positions'],
+    queryFn: async () => {
+      const response = await api.get<LivePosition[]>('/tracking/live-positions');
+      return response.data;
+    },
+    refetchInterval: 30_000,
   });
 };
 

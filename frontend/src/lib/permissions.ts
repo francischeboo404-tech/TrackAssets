@@ -32,11 +32,33 @@ export function canAccess(role: string | undefined, allowed: UserRole[]): boolea
 }
 
 const STATUS_TRANSITIONS: Record<string, Record<string, UserRole[]>> = {
-  requested: { approved: ['dept_head'], rejected: ['dept_head'] },
-  rejected: { requested: ['staff', 'dept_head'] },
-  approved: { in_use: ['staff', 'store_manager'] },
-  in_use: { maintenance: ['staff', 'store_manager'], disposed: ['admin'] },
-  maintenance: { in_use: ['staff', 'store_manager'], disposed: ['admin'] },
+  available: {
+    assigned: ['store_manager', 'dept_head'],
+    under_maintenance: ['staff', 'store_manager'],
+    lost: ['store_manager'],
+    damaged: ['store_manager'],
+    disposed: ['admin'],
+  },
+  assigned: {
+    available: ['store_manager', 'dept_head'],
+    under_maintenance: ['staff', 'store_manager'],
+    lost: ['store_manager'],
+    damaged: ['store_manager'],
+    disposed: ['admin'],
+  },
+  under_maintenance: {
+    available: ['staff', 'store_manager'],
+    assigned: ['store_manager', 'dept_head'],
+    disposed: ['admin'],
+  },
+  lost: {
+    available: ['store_manager'],
+    disposed: ['admin'],
+  },
+  damaged: {
+    under_maintenance: ['staff', 'store_manager'],
+    disposed: ['admin'],
+  },
 };
 
 export function canTransitionAsset(
@@ -49,6 +71,14 @@ export function canTransitionAsset(
   if (toStatus === 'disposed') return false;
   const allowed = STATUS_TRANSITIONS[fromStatus]?.[toStatus];
   return !!allowed?.includes(role as UserRole);
+}
+
+export function canAssignAsset(role?: string): boolean {
+  return canAccess(role, ['store_manager', 'dept_head']);
+}
+
+export function canReturnAsset(role?: string): boolean {
+  return canAccess(role, ['store_manager', 'dept_head']);
 }
 
 export function canCreateAsset(role?: string): boolean {

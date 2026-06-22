@@ -135,6 +135,58 @@ def get_item_history(item_type, item_id):
     )
 
 
+@tracking_bp.route("/live-positions", methods=["GET"])
+@jwt_required_with_user
+def get_live_positions():
+    """Return the latest GPS-tagged scan event per item for the organisation."""
+    from app import db
+    from app.models.scan_event import ScanEvent
+    from sqlalchemy import func
+
+    org_id = get_current_organisation_id()
+
+    subq = (
+        db.session.query(
+            ScanEvent.item_type,
+            ScanEvent.item_id,
+            func.max(ScanEvent.timestamp).label("latest"),
+        )
+        .filter(
+            ScanEvent.organisation_id == org_id,
+            ScanEvent.latitude.isnot(None),
+            ScanEvent.longitude.isnot(None),
+            ScanEvent.validation_status == "verified",
+        )
+        .group_by(ScanEvent.item_type, ScanEvent.item_id)
+        .subquery()
+    )
+
+    events = (
+        db.session.query(ScanEvent)
+        .join(
+            subq,
+            (ScanEvent.item_type == subq.c.item_type)
+            & (ScanEvent.item_id == subq.c.item_id)
+            & (ScanEvent.timestamp == subq.c.latest),
+        )
+        .filter(ScanEvent.organisation_id == org_id)
+        .all()
+    )
+
+    return jsonify([
+        {
+            "item_type": e.item_type,
+            "item_id": e.item_id,
+            "lat": e.latitude,
+            "lon": e.longitude,
+            "action": e.action_type,
+            "timestamp": e.timestamp.isoformat(),
+            "warehouse_id": e.warehouse_id,
+        }
+        for e in events
+    ]), 200
+
+
 @tracking_bp.route("/allowed-actions", methods=["GET"])
 @jwt_required_with_user
 def get_allowed_scan_actions():

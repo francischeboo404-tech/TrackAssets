@@ -32,9 +32,10 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
     e.preventDefault();
     if (!newDepartmentId) return;
 
-    const payload: any = { 
-      new_department_id: Number(newDepartmentId), 
-      new_location: newLocation, 
+    const payload: any = {
+      transfer_type: 'department_to_department',
+      new_department_id: Number(newDepartmentId),
+      new_location: newLocation,
       comment,
       to_warehouse_id: toWarehouseId ? Number(toWarehouseId) : undefined,
       to_bin_id: toBinId ? Number(toBinId) : undefined,

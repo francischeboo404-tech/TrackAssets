@@ -6,6 +6,7 @@ import { LayoutShell } from './components/layout/LayoutShell';
 import { ProtectedRoute } from './components/layout/ProtectedRoute';
 import { ToastContainer } from './components/ui/ToastContainer';
 import { useSSE } from './hooks/useSSE';
+import { LiveTrackingProvider } from './context/LiveTrackingContext';
 import { Suspense, lazy } from 'react';
 
 // Pages
@@ -31,7 +32,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ToastProvider>
-          <AppContent />
+          <LiveTrackingProvider>
+            <AppContent />
+          </LiveTrackingProvider>
         </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>

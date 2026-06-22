@@ -11,12 +11,14 @@ import {
   useAllowedScanActions,
   useRecordScan,
   useTrackingHistory,
+  useLivePositions,
 } from '../hooks/useTracking';
+import { useLiveTracking } from '../context/LiveTrackingContext';
 import { TrackingTimeline } from '../components/ui/TrackingTimeline';
 import { canPerformScanAction, isReadOnlyScanner } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker } from 'react-leaflet';
 import L from 'leaflet';
 import { useSearchParams } from 'react-router-dom';
 
@@ -58,6 +60,8 @@ const Tracking = () => {
   const recordScan = useRecordScan();
   const { data: allowedActions } = useAllowedScanActions();
   const scannerRef = useRef<any>(null);
+  const { positions, updatePosition } = useLiveTracking();
+  const { data: livePositionsData } = useLivePositions();
 
   const actionOptions =
     allowedActions?.actions?.filter((a) =>
@@ -180,10 +184,34 @@ const Tracking = () => {
     if (qrInput) processScan(qrInput);
   };
 
+  // Seed live context with initial API positions on first load
+  useEffect(() => {
+    if (!livePositionsData) return;
+    livePositionsData.forEach(updatePosition);
+  }, [livePositionsData]);
+
+  // Auto-follow: when the currently scanned item gets a new live position via SSE, re-center the map
+  useEffect(() => {
+    if (!scanResult?.item) return;
+    const key = `${scanResult.item.type}:${scanResult.item.id}`;
+    const livePos = positions[key];
+    if (livePos) {
+      setMapCenter([livePos.lat, livePos.lon]);
+    }
+  }, [positions, scanResult?.item?.type, scanResult?.item?.id]);
+
   // Convert history to coordinates for the polyline
   const polylineCoords = history
     .filter(h => h.latitude && h.longitude)
     .map(h => [h.latitude, h.longitude] as [number, number]);
+
+  // Fleet markers: all live positions except the currently tracked item
+  const currentKey = scanResult?.item
+    ? `${scanResult.item.type}:${scanResult.item.id}`
+    : null;
+  const fleetMarkers = Object.values(positions).filter(
+    p => `${p.item_type}:${p.item_id}` !== currentKey,
+  );
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -383,6 +411,26 @@ const Tracking = () => {
                       ))}
                     </>
                   )}
+
+                  {/* Fleet markers — other items' last known positions */}
+                  {fleetMarkers.map(p => (
+                    <CircleMarker
+                      key={`${p.item_type}:${p.item_id}`}
+                      center={[p.lat, p.lon]}
+                      radius={7}
+                      pathOptions={{ color: '#64748b', fillColor: '#94a3b8', fillOpacity: 0.85, weight: 2 }}
+                    >
+                      <Popup>
+                        <div className="p-1">
+                          <p className="font-black text-slate-900 text-xs uppercase tracking-widest">
+                            {p.item_type.replace('_', ' ')} #{p.item_id}
+                          </p>
+                          <p className="text-slate-500 text-[10px] mt-0.5">{p.action} · {new Date(p.timestamp).toLocaleTimeString()}</p>
+                          <p className="text-slate-400 text-[10px] font-mono">{p.lat.toFixed(5)}, {p.lon.toFixed(5)}</p>
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
                 </MapContainer>
 
                 {/* Floating Map Legend */}
@@ -394,6 +442,9 @@ const Tracking = () => {
                       <div>
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Tracking</p>
                         <p className="text-xs font-bold">{mapCenter[0].toFixed(4)}, {mapCenter[1].toFixed(4)}</p>
+                        {Object.keys(positions).length > 0 && (
+                          <p className="text-[10px] text-slate-500 mt-0.5">{Object.keys(positions).length} item{Object.keys(positions).length !== 1 ? 's' : ''} on fleet</p>
+                        )}
                       </div>
                    </div>
                 </div>
