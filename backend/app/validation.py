@@ -120,6 +120,64 @@ class DepartmentSchema(Schema):
     )
     description = fields.Str(validate=validate.Length(max=1000))
     head_id = fields.Int(validate=validate.Range(min=1))
+    allowed_category_ids = fields.List(
+        fields.Int(validate=validate.Range(min=1)),
+        load_default=[],
+        allow_none=True,
+    )
+    allowed_inventory_item_types = fields.List(
+        fields.Str(
+            validate=validate.OneOf([
+                "consumable",
+                "asset",
+                "raw",
+                "finished",
+                "service",
+            ])
+        ),
+        load_default=[],
+        allow_none=True,
+    )
+    allowed_asset_types = fields.List(
+        fields.Str(validate=validate.Length(min=1, max=100)),
+        load_default=[],
+        allow_none=True,
+    )
+
+
+class DepartmentUpdateSchema(Schema):
+    name = fields.Str(validate=validate.Length(min=1, max=255))
+    code = fields.Str(
+        validate=[
+            validate.Length(min=1, max=50),
+            validate.Regexp(
+                r"^[A-Z0-9_]+$",
+                error="Code must be uppercase letters, numbers, and underscores",
+            ),
+        ],
+    )
+    description = fields.Str(validate=validate.Length(max=1000), allow_none=True)
+    head_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    allowed_category_ids = fields.List(
+        fields.Int(validate=validate.Range(min=1)),
+        allow_none=True,
+    )
+    allowed_inventory_item_types = fields.List(
+        fields.Str(
+            validate=validate.OneOf([
+                "consumable",
+                "asset",
+                "raw",
+                "finished",
+                "service",
+            ])
+        ),
+        allow_none=True,
+    )
+    allowed_asset_types = fields.List(
+        fields.Str(validate=validate.Length(min=1, max=100)),
+        allow_none=True,
+    )
 
 
 class AssetSchema(Schema):
@@ -242,6 +300,22 @@ class InventoryItemSchema(Schema):
     reorder_level = fields.Int(validate=validate.Range(min=0))
     unit_price = fields.Float(required=True, validate=validate.Range(min=0))
     unit = fields.Str(validate=validate.Length(max=50))
+    category_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    item_type = fields.Str(validate=validate.OneOf(["consumable", "asset", "raw", "finished", "service"]), load_default="consumable")
+    status = fields.Str(validate=validate.Length(max=50), load_default="active")
+    preferred_supplier_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    supplier_item_reference = fields.Str(validate=validate.Length(max=255), allow_none=True)
+    purchase_cost = fields.Float(validate=validate.Range(min=0), allow_none=True)
+    last_purchase_cost = fields.Float(validate=validate.Range(min=0), allow_none=True)
+    tax_category = fields.Str(validate=validate.Length(max=100), allow_none=True)
+    lead_time_days = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    min_stock_level = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    max_stock_level = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    safety_stock = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    opening_stock = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    batch_tracking = fields.Boolean(load_default=False)
+    serial_tracking = fields.Boolean(load_default=False)
+    expiry_tracking = fields.Boolean(load_default=False)
 
 
 class StockMovementSchema(Schema):
@@ -250,6 +324,29 @@ class StockMovementSchema(Schema):
     warehouse_id = fields.Int(validate=validate.Range(min=1))
     reference = fields.Str(validate=validate.Length(max=255))
     notes = fields.Str(validate=validate.Length(max=1000))
+
+
+class InventoryBatchSchema(Schema):
+    """Schema for inventory batch operations"""
+    batch_number = fields.Str(required=True, validate=validate.Length(min=1, max=100))
+    item_id = fields.Int(required=True, validate=validate.Range(min=1))
+    quantity = fields.Int(required=True, validate=validate.Range(min=0))
+    warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    received_date = fields.DateTime(format='%Y-%m-%dT%H:%M:%S', required=True)
+    manufacture_date = fields.DateTime(format='%Y-%m-%dT%H:%M:%S', allow_none=True)
+    expiry_date = fields.DateTime(format='%Y-%m-%dT%H:%M:%S', allow_none=True)
+    supplier_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    status = fields.Str(validate=validate.OneOf(['available', 'reserved', 'used', 'expired', 'discarded']), load_default='available')
+
+    @validates_schema
+    def validate_dates(self, data, **kwargs):
+        """Ensure manufacture_date and expiry_date are after received_date"""
+        if data.get('manufacture_date') and data.get('received_date'):
+            if data['manufacture_date'] < data['received_date']:
+                raise ValidationError('Manufacture date must be on or after received date', 'manufacture_date')
+        if data.get('expiry_date') and data.get('received_date'):
+            if data['expiry_date'] < data['received_date']:
+                raise ValidationError('Expiry date must be on or after received date', 'expiry_date')
 
 
 class TransferSchema(Schema):

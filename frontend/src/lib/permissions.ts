@@ -6,29 +6,60 @@ import type { UserRole } from '../types';
  * Inventory Manager → store_manager | Viewer → viewer
  */
 export const ROLE_LABELS: Record<UserRole, string> = {
+  superadmin: 'Super Administrator',
   admin: 'Admin',
-  dept_head: 'Procurement Officer',
-  staff: 'Logistics Manager',
   store_manager: 'Inventory Manager',
+  logistics_officer: 'Logistics Officer',
+  procurement_officer: 'Procurement Officer',
+  employee: 'Staff',
   viewer: 'Viewer',
   auditor: 'Auditor',
+  dept_head: 'Procurement Officer',
+  staff: 'Logistics Officer',
 };
 
-const PRIVILEGED: UserRole[] = ['admin'];
+const PRIVILEGED: UserRole[] = ['admin', 'superadmin'];
 const READ_ONLY: UserRole[] = ['viewer', 'auditor'];
+
+const ROLE_EQUIVALENTS: Record<UserRole, UserRole[]> = {
+  superadmin: ['superadmin'],
+  admin: ['admin'],
+  store_manager: ['store_manager'],
+  logistics_officer: ['logistics_officer', 'staff'],
+  procurement_officer: ['procurement_officer', 'dept_head'],
+  employee: ['employee', 'viewer'],
+  viewer: ['employee', 'viewer'],
+  auditor: ['auditor'],
+  dept_head: ['procurement_officer', 'dept_head'],
+  staff: ['logistics_officer', 'staff'],
+};
+
+function getRoleEquivalents(role?: string): UserRole[] {
+  if (!role) return [];
+  const normalized = role as UserRole;
+  return ROLE_EQUIVALENTS[normalized] ?? [normalized];
+}
+
+function roleMatches(role: string | undefined, allowedRole: UserRole): boolean {
+  const equivalents = getRoleEquivalents(role);
+  const allowedEquivalents = getRoleEquivalents(allowedRole);
+  return equivalents.some((equivalent) => allowedEquivalents.includes(equivalent));
+}
 
 export function isPrivileged(role?: string): boolean {
   return !!role && PRIVILEGED.includes(role as UserRole);
 }
 
 export function isReadOnly(role?: string): boolean {
-  return !!role && READ_ONLY.includes(role as UserRole);
+  if (!role) return false;
+  const equivalents = getRoleEquivalents(role);
+  return equivalents.some((equivalent) => READ_ONLY.includes(equivalent));
 }
 
 export function canAccess(role: string | undefined, allowed: UserRole[]): boolean {
   if (!role) return false;
   if (isPrivileged(role)) return true;
-  return allowed.includes(role as UserRole);
+  return allowed.some((allowedRole) => roleMatches(role, allowedRole));
 }
 
 const STATUS_TRANSITIONS: Record<string, Record<string, UserRole[]>> = {
@@ -70,7 +101,8 @@ export function canTransitionAsset(
   if (isPrivileged(role)) return true;
   if (toStatus === 'disposed') return false;
   const allowed = STATUS_TRANSITIONS[fromStatus]?.[toStatus];
-  return !!allowed?.includes(role as UserRole);
+  if (!allowed) return false;
+  return allowed.some((allowedRole) => roleMatches(role, allowedRole));
 }
 
 export function canAssignAsset(role?: string): boolean {

@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from datetime import datetime
+from app import limiter
 
 from app import db
 from app.auth_utils import (
@@ -29,8 +30,7 @@ inventory_service = InventoryService(
 
 inventory_bp = Blueprint("inventory", __name__)
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @inventory_bp.route("", methods=["GET"])
@@ -71,6 +71,21 @@ def get_inventory():
                         "total_value": i.quantity * i.unit_price,
                         "created_at": i.created_at.isoformat(),
                         "updated_at": i.updated_at.isoformat(),
+                        # expose new master-data fields for frontend and reporting
+                        "category_id": getattr(i, 'category_id', None),
+                        "item_type": getattr(i, 'item_type', None),
+                        "status": getattr(i, 'status', None),
+                        "preferred_supplier_id": getattr(i, 'preferred_supplier_id', None),
+                        "supplier_item_reference": getattr(i, 'supplier_item_reference', None),
+                        "purchase_cost": getattr(i, 'purchase_cost', None),
+                        "last_purchase_cost": getattr(i, 'last_purchase_cost', None),
+                        "tax_category": getattr(i, 'tax_category', None),
+                        "lead_time_days": getattr(i, 'lead_time_days', None),
+                        "min_stock_level": getattr(i, 'min_stock_level', None),
+                        "max_stock_level": getattr(i, 'max_stock_level', None),
+                        "safety_stock": getattr(i, 'safety_stock', None),
+                        "opening_stock": getattr(i, 'opening_stock', None),
+                        "unit": i.unit,
                     }
                     for i in items.items
                 ],
@@ -112,6 +127,19 @@ def get_inventory_item(item_id):
                 "total_value": item.quantity * item.unit_price,
                 "created_at": item.created_at.isoformat(),
                 "updated_at": item.updated_at.isoformat(),
+                "category_id": getattr(item, 'category_id', None),
+                "item_type": getattr(item, 'item_type', None),
+                "status": getattr(item, 'status', None),
+                "preferred_supplier_id": getattr(item, 'preferred_supplier_id', None),
+                "supplier_item_reference": getattr(item, 'supplier_item_reference', None),
+                "purchase_cost": getattr(item, 'purchase_cost', None),
+                "last_purchase_cost": getattr(item, 'last_purchase_cost', None),
+                "tax_category": getattr(item, 'tax_category', None),
+                "lead_time_days": getattr(item, 'lead_time_days', None),
+                "min_stock_level": getattr(item, 'min_stock_level', None),
+                "max_stock_level": getattr(item, 'max_stock_level', None),
+                "safety_stock": getattr(item, 'safety_stock', None),
+                "opening_stock": getattr(item, 'opening_stock', None),
                 "recent_movements": [
                     {
                         "id": m.id,
@@ -364,4 +392,195 @@ def get_inventory_stats():
     org_id = get_current_organisation_id()
 
     stats = inventory_service.stats(org_id)
+    return jsonify(stats), 200
+
+
+# ============ BATCH ENDPOINTS ============
+
+# Import batch service and schema
+from app.services.inventory_service import InventoryBatchService
+from app.validation import InventoryBatchSchema
+
+batch_service = InventoryBatchService(session=db.session)
+
+
+@inventory_bp.route("/batches", methods=["GET"])
+@jwt_required_with_user
+@limiter.limit("100 per minute")
+def list_batches():
+    """List inventory batches for current organization"""
+    org_id = get_current_organisation_id()
+    
+    page = request.args.get("page", 1, type=int)
+    per_page = request.args.get("per_page", 50, type=int)
+    search = request.args.get("search")
+    item_id = request.args.get("item_id", type=int)
+    status = request.args.get("status")
+    show_expired = request.args.get("show_expired", False, type=bool)
+    
+    batches = batch_service.list_batches(
+        org_id, page=page, per_page=per_page, search=search,
+        item_id=item_id, status=status, show_expired=show_expired
+    )
+    
+    return jsonify({
+        "batches": [
+            {
+                "id": b.id,
+                "batch_number": b.batch_number,
+                "item_id": b.item_id,
+                "quantity": b.quantity,
+                "warehouse_id": b.warehouse_id,
+                "received_date": b.received_date.isoformat() if b.received_date else None,
+                "manufacture_date": b.manufacture_date.isoformat() if b.manufacture_date else None,
+                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+                "supplier_id": b.supplier_id,
+                "status": b.status,
+                "is_expired": b.is_expired(),
+                "created_at": b.created_at.isoformat(),
+                "updated_at": b.updated_at.isoformat(),
+            }
+            for b in batches.items
+        ],
+        "pagination": {
+            "page": batches.page,
+            "per_page": batches.per_page,
+            "total": batches.total,
+            "pages": batches.pages,
+            "has_next": batches.has_next,
+            "has_prev": batches.has_prev,
+        },
+    }), 200
+
+
+@inventory_bp.route("/batches/<int:batch_id>", methods=["GET"])
+@jwt_required_with_user
+@limiter.limit("200 per minute")
+def get_batch(batch_id):
+    """Get specific batch"""
+    org_id = get_current_organisation_id()
+    batch = batch_service.get_batch(batch_id, org_id)
+    
+    return jsonify({
+        "id": batch.id,
+        "batch_number": batch.batch_number,
+        "item_id": batch.item_id,
+        "quantity": batch.quantity,
+        "warehouse_id": batch.warehouse_id,
+        "received_date": batch.received_date.isoformat() if batch.received_date else None,
+        "manufacture_date": batch.manufacture_date.isoformat() if batch.manufacture_date else None,
+        "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None,
+        "supplier_id": batch.supplier_id,
+        "status": batch.status,
+        "is_expired": batch.is_expired(),
+        "created_at": batch.created_at.isoformat(),
+        "updated_at": batch.updated_at.isoformat(),
+    }), 200
+
+
+@inventory_bp.route("/batches", methods=["POST"])
+@jwt_required_with_user
+@require_permission("inventory:create")
+@limiter.limit("50 per minute")
+def create_batch():
+    """Create a new batch"""
+    org_id = get_current_organisation_id()
+    data = request.get_json() or {}
+    
+    validated_data, errors = validate_input(InventoryBatchSchema, data)
+    if errors:
+        return jsonify({"errors": errors}), 400
+    
+    batch = batch_service.create_batch(org_id, validated_data)
+    
+    return jsonify({
+        "id": batch.id,
+        "batch_number": batch.batch_number,
+        "item_id": batch.item_id,
+        "quantity": batch.quantity,
+        "warehouse_id": batch.warehouse_id,
+        "received_date": batch.received_date.isoformat() if batch.received_date else None,
+        "manufacture_date": batch.manufacture_date.isoformat() if batch.manufacture_date else None,
+        "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None,
+        "supplier_id": batch.supplier_id,
+        "status": batch.status,
+        "created_at": batch.created_at.isoformat(),
+        "updated_at": batch.updated_at.isoformat(),
+    }), 201
+
+
+@inventory_bp.route("/batches/<int:batch_id>", methods=["PUT"])
+@jwt_required_with_user
+@require_permission("inventory:edit")
+@limiter.limit("50 per minute")
+def update_batch(batch_id):
+    """Update a batch"""
+    org_id = get_current_organisation_id()
+    data = request.get_json() or {}
+    
+    validated_data, errors = validate_input(InventoryBatchSchema, data, partial=True)
+    if errors:
+        return jsonify({"errors": errors}), 400
+    
+    batch = batch_service.update_batch(batch_id, org_id, validated_data)
+    
+    return jsonify({
+        "id": batch.id,
+        "batch_number": batch.batch_number,
+        "item_id": batch.item_id,
+        "quantity": batch.quantity,
+        "warehouse_id": batch.warehouse_id,
+        "received_date": batch.received_date.isoformat() if batch.received_date else None,
+        "manufacture_date": batch.manufacture_date.isoformat() if batch.manufacture_date else None,
+        "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None,
+        "supplier_id": batch.supplier_id,
+        "status": batch.status,
+        "updated_at": batch.updated_at.isoformat(),
+    }), 200
+
+
+@inventory_bp.route("/batches/<int:batch_id>", methods=["DELETE"])
+@jwt_required_with_user
+@require_permission("inventory:delete")
+@limiter.limit("50 per minute")
+def delete_batch(batch_id):
+    """Delete a batch"""
+    org_id = get_current_organisation_id()
+    result = batch_service.delete_batch(batch_id, org_id)
+    return jsonify(result), 204
+
+
+@inventory_bp.route("/batches/expiring", methods=["GET"])
+@jwt_required_with_user
+@limiter.limit("50 per minute")
+def get_expiring_batches():
+    """Get batches expiring within specified days"""
+    org_id = get_current_organisation_id()
+    days = request.args.get("days", 30, type=int)
+    
+    batches = batch_service.get_expiring_batches(org_id, days=days)
+    
+    return jsonify({
+        "expiring_batches": [
+            {
+                "id": b.id,
+                "batch_number": b.batch_number,
+                "item_id": b.item_id,
+                "quantity": b.quantity,
+                "expiry_date": b.expiry_date.isoformat() if b.expiry_date else None,
+                "days_until_expiry": (b.expiry_date - datetime.utcnow()).days if b.expiry_date else None,
+            }
+            for b in batches
+        ],
+        "count": len(batches),
+    }), 200
+
+
+@inventory_bp.route("/batches/stats", methods=["GET"])
+@jwt_required_with_user
+@limiter.limit("50 per minute")
+def get_batch_stats():
+    """Get batch statistics"""
+    org_id = get_current_organisation_id()
+    stats = batch_service.batch_stats(org_id)
     return jsonify(stats), 200

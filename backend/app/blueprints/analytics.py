@@ -125,11 +125,18 @@ def export_valuation():
 def stream_events():
     """Real-time event stream (SSE)."""
     org_id = get_current_organisation_id()
-    return Response(
-        event_bus.stream(organisation_id=org_id),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    try:
+        gen = event_bus.stream(organisation_id=org_id)
+        return Response(
+            gen,
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except Exception as e:
+        # If the stream cannot be established, return a Service Unavailable
+        from flask import current_app
+        current_app.logger.error(f"Failed to start SSE stream: {e}")
+        return jsonify({"success": False, "message": "Event stream unavailable"}), 503

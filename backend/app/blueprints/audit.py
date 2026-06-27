@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, Response, jsonify, request
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from app import limiter
 
 from app import db
 from app.auth_utils import (
@@ -14,8 +15,7 @@ from app.models import inventory
 
 audit_bp = Blueprint("audit", __name__)
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @audit_bp.route("/logs", methods=["GET"])

@@ -28,6 +28,25 @@ class InventoryItem(db.Model):
     reorder_level = db.Column(db.Integer, nullable=False, default=10)
     unit_price = db.Column(db.Numeric(12, 2), nullable=False)
     unit = db.Column(db.String(50))
+    # Extended master-data for procurement & traceability
+    category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), nullable=True)
+    item_type = db.Column(db.String(50), default='consumable')  # consumable|asset|raw|finished|service
+    status = db.Column(db.String(50), default='active')
+    preferred_supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
+    supplier_item_reference = db.Column(db.String(255), nullable=True)
+    purchase_cost = db.Column(db.Numeric(12,2), nullable=True)
+    last_purchase_cost = db.Column(db.Numeric(12,2), nullable=True)
+    tax_category = db.Column(db.String(100), nullable=True)
+    lead_time_days = db.Column(db.Integer, nullable=True)
+    # Inventory control fields (item-level defaults; warehouse-level overrides exist in WarehouseStock)
+    min_stock_level = db.Column(db.Integer, nullable=True)
+    max_stock_level = db.Column(db.Integer, nullable=True)
+    safety_stock = db.Column(db.Integer, nullable=True)
+    opening_stock = db.Column(db.Integer, nullable=True)
+    # Traceability flags
+    batch_tracking = db.Column(db.Boolean, default=False)
+    serial_tracking = db.Column(db.Boolean, default=False)
+    expiry_tracking = db.Column(db.Boolean, default=False)
     qr_code_data = db.Column(db.String(500))
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -74,6 +93,10 @@ class InventoryItem(db.Model):
 
     restock_alerts = db.relationship(
         "RestockAlert", backref="item", lazy=True, cascade="all, delete-orphan"
+    )
+
+    batches = db.relationship(
+        "InventoryBatch", backref="item_ref", lazy=True, cascade="all, delete-orphan"
     )
 
     @transaction_retry(max_retries=3)
@@ -129,11 +152,25 @@ class InventoryItem(db.Model):
             raise ValueError("Insufficient total stock")
 
         # Update Warehouse Stock if provided
+        
         if warehouse_id:
             from app.models.stock_levels import WarehouseStock
+
+            print("======================")
+            print("Warehouse:", warehouse_id)
+            print("Item:", self.id)
+            print("Quantity:", quantity)
+
             wh_stock = WarehouseStock.query.with_for_update().filter_by(
                 item_id=self.id, warehouse_id=warehouse_id
             ).first()
+
+            print("Warehouse Stock:", wh_stock)
+
+            if wh_stock:
+                print("On Hand:", wh_stock.quantity_on_hand)
+                print("Reserved:", wh_stock.quantity_reserved)
+                print("Available:", wh_stock.quantity_available)    
             
             if not wh_stock or wh_stock.quantity_on_hand < quantity:
                 raise ValueError("Insufficient stock in specified warehouse")
@@ -161,6 +198,47 @@ class InventoryItem(db.Model):
 
     def __repr__(self):
         return f"<InventoryItem {self.name}>"
+
+
+class InventoryBatch(db.Model):
+    """Batch records for traceability and expiry management"""
+
+    __tablename__ = 'inventory_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    organisation_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
+    batch_number = db.Column(db.String(200), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False, default=0)
+    warehouse_id = db.Column(db.Integer, db.ForeignKey('warehouses.id'), nullable=True)
+    received_date = db.Column(db.DateTime, nullable=True)
+    manufacture_date = db.Column(db.DateTime, nullable=True)
+    expiry_date = db.Column(db.DateTime, nullable=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey('suppliers.id'), nullable=True)
+    status = db.Column(db.String(50), default='available')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('organisation_id', 'item_id', 'batch_number', name='uq_batch_org_item_number'),
+        db.CheckConstraint('quantity >= 0', name='ck_batch_quantity_nonneg'),
+        db.Index('ix_inventory_batches_org_item', 'organisation_id', 'item_id'),
+        db.Index('ix_inventory_batches_batch_number', 'batch_number'),
+        db.Index('ix_inventory_batches_expiry', 'expiry_date'),
+        db.Index('ix_inventory_batches_status', 'status'),
+    )
+
+    warehouse = db.relationship('Warehouse', backref='batches', lazy=True)
+    supplier = db.relationship('Supplier', backref='batches', lazy=True)
+
+    def is_expired(self):
+        """Check if batch is expired"""
+        if not self.expiry_date:
+            return False
+        return datetime.utcnow() > self.expiry_date
+
+    def __repr__(self):
+        return f"<InventoryBatch {self.batch_number}>"
 
 
 class StockMovement(db.Model):

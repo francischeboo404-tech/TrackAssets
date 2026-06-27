@@ -1,29 +1,36 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AuthProvider } from './context/AuthContext';
-import { ToastProvider } from './context/ToastContext';
-import { LayoutShell } from './components/layout/LayoutShell';
-import { ProtectedRoute } from './components/layout/ProtectedRoute';
-import { ToastContainer } from './components/ui/ToastContainer';
-import { useSSE } from './hooks/useSSE';
-import { LiveTrackingProvider } from './context/LiveTrackingContext';
-import { Suspense, lazy } from 'react';
+import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { AuthProvider } from "./context/AuthContext";
+import { ToastProvider } from "./context/ToastContext";
+import { LayoutShell } from "./components/layout/LayoutShell";
+import { ProtectedRoute } from "./components/layout/ProtectedRoute";
+import { ToastContainer } from "./components/ui/ToastContainer";
+import { useSSE } from "./hooks/useSSE";
+import { LiveTrackingProvider } from "./context/LiveTrackingContext";
+import { Suspense, lazy } from "react";
 
 // Pages
-const Login = lazy(() => import('./pages/Login'));
-const Register = lazy(() => import('./pages/Register'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Inventory = lazy(() => import('./pages/Inventory'));
-const Assets = lazy(() => import('./pages/Assets'));
-const Warehouses = lazy(() => import('./pages/Warehouses'));
-const Analytics = lazy(() => import('./pages/Analytics'));
-const AuditLogs = lazy(() => import('./pages/AuditLogs'));
-const Transfers = lazy(() => import('./pages/Transfers'));
-const Users = lazy(() => import('./pages/Users'));
-const Tracking = lazy(() => import('./pages/Tracking'));
-const Reports = lazy(() => import('./pages/Reports'));
-const Departments = lazy(() => import('./pages/Departments'));
-const Settings = lazy(() => import('./pages/Settings'));
+const Login = lazy(() => import("./pages/Login"));
+const Register = lazy(() => import("./pages/Register"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Inventory = lazy(() => import("./pages/Inventory"));
+const Assets = lazy(() => import("./pages/Assets"));
+const Warehouses = lazy(() => import("./pages/Warehouses"));
+const Analytics = lazy(() => import("./pages/Analytics"));
+const AuditLogs = lazy(() => import("./pages/AuditLogs"));
+const Transfers = lazy(() => import("./pages/Transfers"));
+const Users = lazy(() => import("./pages/Users"));
+const Tracking = lazy(() => import("./pages/Tracking"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Departments = lazy(() => import("./pages/Departments"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Requisitions = lazy(() => import("./pages/Requisitions"));
+const PurchaseRequests = lazy(
+  () => import("./pages/procurement/PurchaseRequests"),
+);
+const PurchaseOrders = lazy(() => import("./pages/procurement/PurchaseOrders"));
+const GoodsReceipts = lazy(() => import("./pages/receiving/GoodsReceipts"));
+const Suppliers = lazy(() => import("./pages/procurement/Suppliers"));
 
 const queryClient = new QueryClient();
 
@@ -46,12 +53,18 @@ function AppContent() {
 
   return (
     <Router>
-      <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-brand-primary font-black animate-pulse uppercase tracking-[0.2em] text-xs">Loading TrackIT Core...</div>}>
+      <Suspense
+        fallback={
+          <div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-brand-primary font-black animate-pulse uppercase tracking-[0.2em] text-xs">
+            Loading TrackIT Core...
+          </div>
+        }
+      >
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          <Route 
-            path="/*" 
+          <Route
+            path="/*"
             element={
               <ProtectedRoute>
                 <LayoutShell>
@@ -60,60 +73,89 @@ function AppContent() {
                     <Route path="/inventory" element={<Inventory />} />
                     <Route path="/assets" element={<Assets />} />
                     <Route path="/warehouses" element={<Warehouses />} />
-                    <Route 
-                      path="/analytics" 
-                      element={
-                        <ProtectedRoute allowedRoles={['admin', 'store_manager', 'auditor', 'dept_head', 'staff', 'viewer']}>
-                          <Analytics />
-                        </ProtectedRoute>
-                      } 
+                    <Route path="/requisitions" element={<Requisitions />} />
+                    <Route
+                      path="/purchase-requests"
+                      element={<PurchaseRequests />}
                     />
+                    <Route
+                      path="/purchase-orders"
+                      element={<PurchaseOrders />}
+                    />
+                    <Route path="/goods-receipts" element={<GoodsReceipts />} />
+                    <Route path="/analytics" element={<Analytics />} />
                     <Route path="/transfers" element={<Transfers />} />
-                    <Route 
-                      path="/users" 
+                    <Route
+                      path="/users"
                       element={
-                        <ProtectedRoute allowedRoles={['admin']}>
+                        <ProtectedRoute allowedRoles={["admin"]}>
                           <Users />
                         </ProtectedRoute>
-                      } 
+                      }
                     />
                     <Route path="/tracking" element={<Tracking />} />
-                    <Route 
-                      path="/reports" 
+                    <Route
+                      path="/reports"
                       element={
-                        <ProtectedRoute allowedRoles={['admin', 'auditor', 'store_manager']}>
+                        <ProtectedRoute
+                          allowedRoles={[
+                            "admin",
+                            "superadmin",
+                            "auditor",
+                            "store_manager",
+                            "procurement_officer",
+                            "logistics_officer",
+                            "employee",
+                          ]}
+                        >
                           <Reports />
                         </ProtectedRoute>
-                      } 
+                      }
                     />
-                    <Route 
-                      path="/departments" 
+                    <Route
+                      path="/suppliers"
                       element={
-                        <ProtectedRoute allowedRoles={['admin']}>
+                        <ProtectedRoute
+                          allowedRoles={[
+                            "admin",
+                            "procurement_officer",
+                            "store_manager",
+                            "logistics_officer",
+                            "auditor",
+                          ]}
+                        >
+                          <Suppliers />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/departments"
+                      element={
+                        <ProtectedRoute allowedRoles={["admin"]}>
                           <Departments />
                         </ProtectedRoute>
-                      } 
+                      }
                     />
-                    <Route 
-                      path="/settings" 
+                    <Route
+                      path="/settings"
                       element={
-                        <ProtectedRoute allowedRoles={['admin']}>
+                        <ProtectedRoute allowedRoles={["admin"]}>
                           <Settings />
                         </ProtectedRoute>
-                      } 
+                      }
                     />
-                    <Route 
-                      path="/audit-logs" 
+                    <Route
+                      path="/audit-logs"
                       element={
-                        <ProtectedRoute allowedRoles={['admin', 'auditor']}>
+                        <ProtectedRoute allowedRoles={["admin", "auditor"]}>
                           <AuditLogs />
                         </ProtectedRoute>
-                      } 
+                      }
                     />
                   </Routes>
                 </LayoutShell>
               </ProtectedRoute>
-            } 
+            }
           />
         </Routes>
       </Suspense>

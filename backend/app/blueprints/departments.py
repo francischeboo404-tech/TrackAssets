@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from app import limiter
 
 from app import db
 from app.audit_service import AuditService
@@ -11,13 +11,13 @@ from app.auth_utils import (
 )
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.models import organization, user
-from app.validation import DepartmentSchema, validate_input
+from app.models.kenya_gov_models import Category
+from app.validation import DepartmentSchema, DepartmentUpdateSchema, validate_input
 from app.services.event_bus import event_bus
 
 departments_bp = Blueprint("departments", __name__)
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @departments_bp.route("", methods=["GET"])
@@ -60,6 +60,9 @@ def get_departments():
             "created_at": dept.created_at.isoformat(),
             "updated_at": dept.updated_at.isoformat(),
             "asset_count": len(dept.assets),
+            "allowed_category_ids": dept.allowed_category_ids or [],
+            "allowed_inventory_item_types": dept.allowed_inventory_item_types or [],
+            "allowed_asset_types": dept.allowed_asset_types or [],
         }
 
         if dept.head:
@@ -125,6 +128,9 @@ def get_department(dept_id):
                     else None
                 ),
                 "asset_count": len(dept.assets),
+                "allowed_category_ids": dept.allowed_category_ids or [],
+                "allowed_inventory_item_types": dept.allowed_inventory_item_types or [],
+                "allowed_asset_types": dept.allowed_asset_types or [],
                 "assets": [
                     {
                         "id": asset.id,
@@ -160,6 +166,16 @@ def create_department():
     ).first():
         raise ConflictError("Department code already exists")
 
+    allowed_category_ids = validated_data.get("allowed_category_ids") or []
+    if allowed_category_ids:
+        valid_categories = Category.query.filter(
+            Category.id.in_(allowed_category_ids),
+            Category.organization_id == org_id,
+            Category.is_active == True,
+        ).all()
+        if len(valid_categories) != len(set(allowed_category_ids)):
+            raise ValidationError("Invalid allowed category ids")
+
     # Check if head user exists and belongs to organization
     head_id = validated_data.get("head_id")
     if head_id:
@@ -178,6 +194,9 @@ def create_department():
         code=validated_data["code"],
         description=validated_data.get("description"),
         head_id=head_id,
+        allowed_category_ids=validated_data.get("allowed_category_ids") or [],
+        allowed_inventory_item_types=validated_data.get("allowed_inventory_item_types") or [],
+        allowed_asset_types=validated_data.get("allowed_asset_types") or [],
     )
 
     db.session.add(new_dept)
@@ -225,20 +244,44 @@ def update_department(dept_id):
     if not dept:
         raise NotFoundError("Department not found")
 
+    validated_data, errors = validate_input(DepartmentUpdateSchema, data)
+    if errors:
+        raise ValidationError("Validation failed", errors)
+
     # Store old values for audit
     old_values = {
         "name": dept.name,
         "code": dept.code,
         "description": dept.description,
         "head_id": dept.head_id,
+        "allowed_category_ids": dept.allowed_category_ids or [],
+        "allowed_inventory_item_types": dept.allowed_inventory_item_types or [],
+        "allowed_asset_types": dept.allowed_asset_types or [],
     }
 
+    if "allowed_category_ids" in validated_data:
+        allowed_category_ids = validated_data.get("allowed_category_ids") or []
+        if allowed_category_ids:
+            valid_categories = Category.query.filter(
+                Category.id.in_(allowed_category_ids),
+                Category.organization_id == org_id,
+                Category.is_active == True,
+            ).all()
+            if len(valid_categories) != len(set(allowed_category_ids)):
+                raise ValidationError("Invalid allowed category ids")
+
     # Update fields
-    updatable_fields = ["name", "description"]
+    updatable_fields = [
+        "name",
+        "description",
+        "allowed_category_ids",
+        "allowed_inventory_item_types",
+        "allowed_asset_types",
+    ]
 
     for field in updatable_fields:
-        if field in data:
-            setattr(dept, field, data[field])
+        if field in validated_data:
+            setattr(dept, field, validated_data[field] or [])
 
     # Update code if provided (check uniqueness)
     if "code" in data and data["code"] != dept.code:
@@ -269,6 +312,9 @@ def update_department(dept_id):
         "code": dept.code,
         "description": dept.description,
         "head_id": dept.head_id,
+        "allowed_category_ids": dept.allowed_category_ids or [],
+        "allowed_inventory_item_types": dept.allowed_inventory_item_types or [],
+        "allowed_asset_types": dept.allowed_asset_types or [],
     }
     AuditService.log_department_change(
         dept,

@@ -1,6 +1,7 @@
-import React from 'react';
-import { useAuth } from '../../context/AuthContext';
-import type { UserRole } from '../../types';
+import React from "react";
+import { useAuth } from "../../context/AuthContext";
+import { canAccess } from "../../lib/permissions";
+import type { UserRole } from "../../types";
 
 interface CanProps {
   roles: UserRole[];
@@ -11,10 +12,14 @@ interface CanProps {
 /**
  * Procedural UI component for granular role-based rendering.
  */
-export const Can: React.FC<CanProps> = ({ roles, children, fallback = null }) => {
+export const Can: React.FC<CanProps> = ({
+  roles,
+  children,
+  fallback = null,
+}) => {
   const { user } = useAuth();
 
-  if (!user || (user.role !== 'admin' && !roles.includes(user.role as UserRole))) {
+  if (!user || !canAccess(user.role, roles)) {
     return <>{fallback}</>;
   }
 
@@ -23,9 +28,9 @@ export const Can: React.FC<CanProps> = ({ roles, children, fallback = null }) =>
 
 export const usePermission = () => {
   const { user } = useAuth();
-  
+
   return {
-    can: (roles: UserRole[]) => user && (user.role === 'admin' || roles.includes(user.role as UserRole)),
-    role: user?.role as UserRole | undefined
+    can: (roles: UserRole[]) => !!user && canAccess(user.role, roles),
+    role: user?.role as UserRole | undefined,
   };
 };

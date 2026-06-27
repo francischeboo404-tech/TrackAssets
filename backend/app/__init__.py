@@ -135,6 +135,7 @@ def create_app(config_name=None):
         analytics_bp = _import_bp("analytics")
         reports_bp = _import_bp("reports")
         warehouses_bp = _import_bp("warehouses")
+        suppliers_bp = _import_bp("suppliers")
         settings_bp = _import_bp("settings")
         search_bp = _import_bp("search")
 
@@ -157,6 +158,9 @@ def create_app(config_name=None):
         app.register_blueprint(analytics_bp, url_prefix="/api/analytics")
         app.register_blueprint(audit_bp, url_prefix="/api/audit")
         app.register_blueprint(warehouses_bp, url_prefix="/api/warehouses")
+        app.register_blueprint(suppliers_bp, url_prefix="/api/suppliers")
+        categories_bp = _import_bp("categories")
+        app.register_blueprint(categories_bp, url_prefix="/api/categories")
         app.register_blueprint(reports_bp, url_prefix="/api/reports")
         app.register_blueprint(settings_bp, url_prefix="/api/settings")
         app.register_blueprint(search_bp, url_prefix="/api/search")

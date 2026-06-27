@@ -1,6 +1,6 @@
 from flask import Blueprint, g, jsonify, request
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from app import limiter
 
 from app import db
 from app.audit_service import AuditService
@@ -27,8 +27,7 @@ from app.services.event_bus import event_bus
 
 transfers_bp = Blueprint("transfers", __name__)
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @transfers_bp.route("/request", methods=["POST"])

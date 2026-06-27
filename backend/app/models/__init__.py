@@ -10,6 +10,7 @@ from app.models.asset import (
 )
 from app.models.inventory import (
 	InventoryItem,
+	InventoryBatch,
 	StockMovement,
 	AuditLog,
 )
@@ -27,11 +28,13 @@ from app.models.transfer import TransferRequest
 from app.models.scan_event import ScanEvent
 from app.models.item_instance import ItemInstance
 from app.models.stock_levels import WarehouseStock
+from app.models.kenya_gov_models import StockCard, SuppliesLedgerCard
 
 __all__ = [
 	"Asset",
 	"AssetAuditLog",
 	"InventoryItem",
+	"InventoryBatch",
 	"StockMovement",
 	"AuditLog",
 	"User",
@@ -47,4 +50,6 @@ __all__ = [
 	"ScanEvent",
 	"ItemInstance",
 	"WarehouseStock",
+	"StockCard",
+	"SuppliesLedgerCard",
 ]

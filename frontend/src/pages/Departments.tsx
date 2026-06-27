@@ -1,11 +1,42 @@
-import { useState } from 'react';
-import { Plus, Search, Building2, MoreHorizontal, Edit, Trash2, X } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useDepartments, useCreateDepartment, useUpdateDepartment, useDeleteDepartment } from '../hooks/useDepartments';
-import type { Department } from '../hooks/useDepartments';
-import { useUsers } from '../hooks/useUsers';
-import { Can } from '../components/auth/Can';
-import { cn } from '../lib/utils';
+import { useState } from "react";
+import {
+  Plus,
+  Search,
+  Building2,
+  MoreHorizontal,
+  Edit,
+  Trash2,
+  X,
+} from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useCategories } from "../hooks/useCategories";
+import {
+  useDepartments,
+  useCreateDepartment,
+  useUpdateDepartment,
+  useDeleteDepartment,
+} from "../hooks/useDepartments";
+import type { Department } from "../hooks/useDepartments";
+import { useUsers } from "../hooks/useUsers";
+import { Can } from "../components/auth/Can";
+import { cn } from "../lib/utils";
+
+type InventoryItemType =
+  | "consumable"
+  | "asset"
+  | "raw"
+  | "finished"
+  | "service";
+
+interface DepartmentFormData {
+  name: string;
+  code: string;
+  description: string;
+  head_id: number | "";
+  allowed_category_ids: number[];
+  allowed_inventory_item_types: InventoryItemType[];
+  allowed_asset_types: string[];
+}
 
 interface DepartmentModalProps {
   isOpen: boolean;
@@ -13,32 +44,74 @@ interface DepartmentModalProps {
   department: Department | null;
 }
 
-const DepartmentModal = ({ isOpen, onClose, department }: DepartmentModalProps) => {
-  const [formData, setFormData] = useState({
-    name: department?.name || '',
-    code: department?.code || '',
-    description: department?.description || '',
-    head_id: department?.head?.id || '' as number | '',
+const INVENTORY_ITEM_TYPES: Array<{
+  value: InventoryItemType;
+  label: string;
+}> = [
+  { value: "consumable", label: "Consumable" },
+  { value: "asset", label: "Asset" },
+  { value: "raw", label: "Raw Material" },
+  { value: "finished", label: "Finished Product" },
+  { value: "service", label: "Service" },
+];
+
+const ASSET_TYPES = [
+  "Hardware",
+  "Software",
+  "Furniture",
+  "Vehicle",
+  "Infrastructure",
+  "Other",
+];
+
+const DepartmentModal = ({
+  isOpen,
+  onClose,
+  department,
+}: DepartmentModalProps) => {
+  const { data: categoriesData, isLoading: categoriesLoading } =
+    useCategories() as any;
+  const categories = Array.isArray(categoriesData?.categories)
+    ? categoriesData.categories
+    : [];
+  const [formData, setFormData] = useState<DepartmentFormData>({
+    name: department?.name || "",
+    code: department?.code || "",
+    description: department?.description || "",
+    head_id: department?.head?.id || "",
+    allowed_category_ids: department?.allowed_category_ids || [],
+    allowed_inventory_item_types: department?.allowed_inventory_item_types || [
+      "consumable",
+    ],
+    allowed_asset_types: department?.allowed_asset_types || [],
   });
 
   const createDept = useCreateDepartment();
   const updateDept = useUpdateDepartment();
-  const { data: usersData, isLoading: usersLoading } = useUsers({ per_page: 100 } as any); // Load enough users for dropdown
+  const { data: usersData, isLoading: usersLoading } = useUsers({
+    per_page: 100,
+  } as any); // Load enough users for dropdown
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
       ...formData,
-      head_id: formData.head_id === '' ? null : Number(formData.head_id)
+      head_id: formData.head_id === "" ? null : Number(formData.head_id),
+      allowed_category_ids: formData.allowed_category_ids,
+      allowed_inventory_item_types: formData.allowed_inventory_item_types,
+      allowed_asset_types: formData.allowed_asset_types,
     };
 
     if (department) {
-      updateDept.mutate({ id: department.id, data: payload }, {
-        onSuccess: () => onClose()
-      });
+      updateDept.mutate(
+        { id: department.id, data: payload },
+        {
+          onSuccess: () => onClose(),
+        },
+      );
     } else {
       createDept.mutate(payload, {
-        onSuccess: () => onClose()
+        onSuccess: () => onClose(),
       });
     }
   };
@@ -51,7 +124,7 @@ const DepartmentModal = ({ isOpen, onClose, department }: DepartmentModalProps) 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="w-full max-w-lg bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-200"
+            className="w-full max-w-lg sm:max-w-xl md:max-w-2xl max-h-[calc(100vh-4rem)] bg-white shadow-2xl rounded-3xl overflow-hidden overflow-y-auto border border-slate-200"
           >
             <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50">
               <div className="flex items-center gap-3">
@@ -60,78 +133,228 @@ const DepartmentModal = ({ isOpen, onClose, department }: DepartmentModalProps) 
                 </div>
                 <div>
                   <h3 className="font-black text-slate-900 text-lg tracking-tight">
-                    {department ? 'Edit Department' : 'New Department'}
+                    {department ? "Edit Department" : "New Department"}
                   </h3>
-                  <p className="text-xs font-black tracking-widest text-slate-400 uppercase">Institutional Division</p>
+                  <p className="text-xs font-black tracking-widest text-slate-400 uppercase">
+                    Institutional Division
+                  </p>
                 </div>
               </div>
-              <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition-colors">
+              <button
+                onClick={onClose}
+                className="p-2 text-slate-400 hover:bg-slate-100 rounded-xl transition-colors"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">Department Name <span className="text-rose-500">*</span></label>
+                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                    Department Name <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     required
                     type="text"
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, name: e.target.value })
+                    }
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 outline-none transition-all"
                     placeholder="e.g. IT Infrastructure"
                   />
                 </div>
-                
+
                 <div className="space-y-2">
-                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">Department Code <span className="text-rose-500">*</span></label>
+                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                    Department Code <span className="text-rose-500">*</span>
+                  </label>
                   <input
                     required
                     type="text"
                     value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        code: e.target.value.toUpperCase(),
+                      })
+                    }
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 outline-none transition-all uppercase"
                     placeholder="e.g. IT-INF"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">Head of Department</label>
+                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                    Head of Department
+                  </label>
                   <select
                     value={formData.head_id}
-                    onChange={(e) => setFormData({ ...formData, head_id: e.target.value === '' ? '' : Number(e.target.value) })}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        head_id:
+                          e.target.value === "" ? "" : Number(e.target.value),
+                      })
+                    }
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 outline-none transition-all"
                     disabled={usersLoading}
                   >
                     <option value="">-- Unassigned --</option>
-                    {usersData?.users?.map(user => (
+                    {usersData?.users?.map((user) => (
                       <option key={user.id} value={user.id}>
-                        {user.first_name ? `${user.first_name} ${user.last_name}` : user.username}
+                        {user.first_name
+                          ? `${user.first_name} ${user.last_name}`
+                          : user.username}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">Description</label>
+                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                    Description
+                  </label>
                   <textarea
                     value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    onChange={(e) =>
+                      setFormData({ ...formData, description: e.target.value })
+                    }
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 outline-none transition-all resize-none h-24 custom-scrollbar"
                     placeholder="Optional description..."
                   />
                 </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                      Allowed Inventory Categories
+                    </label>
+                    <select
+                      multiple
+                      value={formData.allowed_category_ids.map(String)}
+                      onChange={(e) => {
+                        const selected = Array.from(
+                          e.target.selectedOptions,
+                        ).map((opt) => Number(opt.value));
+                        setFormData({
+                          ...formData,
+                          allowed_category_ids: selected,
+                        });
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-bold focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 outline-none transition-all h-36"
+                      disabled={categoriesLoading}
+                    >
+                      {categories.map((category: any) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Select item categories that may be used for inventory
+                      within this department.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                      Allowed Inventory Item Types
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {INVENTORY_ITEM_TYPES.map((type) => (
+                        <label
+                          key={type.value}
+                          className="inline-flex items-center gap-2 text-sm text-slate-600"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.allowed_inventory_item_types.includes(
+                              type.value,
+                            )}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [
+                                    ...formData.allowed_inventory_item_types,
+                                    type.value,
+                                  ]
+                                : formData.allowed_inventory_item_types.filter(
+                                    (value) => value !== type.value,
+                                  );
+                              setFormData({
+                                ...formData,
+                                allowed_inventory_item_types: next,
+                              });
+                            }}
+                            className="form-checkbox h-4 w-4 text-brand-primary"
+                          />
+                          {type.label}
+                        </label>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Choose permitted inventory item classifications for this
+                      department.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-black tracking-widest uppercase text-slate-500">
+                    Allowed Asset Types
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {ASSET_TYPES.map((assetType) => (
+                      <label
+                        key={assetType}
+                        className="inline-flex items-center gap-2 text-sm text-slate-600"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formData.allowed_asset_types.includes(
+                            assetType,
+                          )}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...formData.allowed_asset_types, assetType]
+                              : formData.allowed_asset_types.filter(
+                                  (value) => value !== assetType,
+                                );
+                            setFormData({
+                              ...formData,
+                              allowed_asset_types: next,
+                            });
+                          }}
+                          className="form-checkbox h-4 w-4 text-brand-primary"
+                        />
+                        {assetType}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Select which asset categories are permitted under this
+                    department.
+                  </p>
+                </div>
               </div>
-              
+
               <div className="pt-6 border-t border-slate-100 flex justify-end gap-3">
-                <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
-                <button 
-                  type="submit" 
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-5 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
                   disabled={createDept.isPending || updateDept.isPending}
                   className="btn-primary"
                 >
-                  {createDept.isPending || updateDept.isPending ? 'Saving...' : 'Save Department'}
+                  {createDept.isPending || updateDept.isPending
+                    ? "Saving..."
+                    : "Save Department"}
                 </button>
               </div>
             </form>
@@ -143,10 +366,12 @@ const DepartmentModal = ({ isOpen, onClose, department }: DepartmentModalProps) 
 };
 
 const Departments = () => {
-  const [search, setSearch] = useState('');
-  const { data: departments, isLoading } = useDepartments({ search: search || undefined });
+  const [search, setSearch] = useState("");
+  const { data: departments, isLoading } = useDepartments({
+    search: search || undefined,
+  });
   const deleteDept = useDeleteDepartment();
-  
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDept, setSelectedDept] = useState<Department | null>(null);
 
@@ -161,7 +386,11 @@ const Departments = () => {
   };
 
   const handleDelete = (dept: Department) => {
-    if (window.confirm(`Are you sure you want to delete ${dept.name}? This cannot be undone.`)) {
+    if (
+      window.confirm(
+        `Are you sure you want to delete ${dept.name}? This cannot be undone.`,
+      )
+    ) {
       deleteDept.mutate(dept.id);
     }
   };
@@ -170,17 +399,26 @@ const Departments = () => {
     <div className="space-y-8">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-2">
-          <h1 className="text-4xl font-black text-slate-900 tracking-tighter flex items-center gap-4" style={{ fontFamily: 'Outfit' }}>
+          <h1
+            className="text-4xl font-black text-slate-900 tracking-tighter flex items-center gap-4"
+            style={{ fontFamily: "Outfit" }}
+          >
             <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-100 text-brand-primary">
               <Building2 className="w-8 h-8" />
             </div>
             Departments
           </h1>
-          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">Manage institutional divisions and asset allocation.</p>
+          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">
+            Manage institutional divisions and asset allocation.
+          </p>
         </div>
-        <Can roles={['admin']}>
-          <button onClick={handleCreate} className="btn-primary flex items-center gap-2 group">
-            <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" /> New Department
+        <Can roles={["admin"]}>
+          <button
+            onClick={handleCreate}
+            className="btn-primary flex items-center gap-2 group"
+          >
+            <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />{" "}
+            New Department
           </button>
         </Can>
       </div>
@@ -188,8 +426,8 @@ const Departments = () => {
       <div className="glass-panel p-2 rounded-2xl border-slate-200/50 bg-white/40 flex items-center gap-4">
         <div className="relative flex-1 group">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-brand-primary transition-colors" />
-          <input 
-            type="text" 
+          <input
+            type="text"
             placeholder="Search departments..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -200,12 +438,14 @@ const Departments = () => {
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-           {[1, 2, 3, 4].map(i => <div key={i} className="h-64 bg-white rounded-3xl animate-pulse" />)}
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-64 bg-white rounded-3xl animate-pulse" />
+          ))}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {departments?.map((dept: Department, index: number) => (
-            <motion.div 
+            <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: index * 0.05 }}
@@ -218,13 +458,18 @@ const Departments = () => {
                     <Building2 className="w-7 h-7" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900 leading-tight">{dept.name}</h3>
+                    <h3 className="text-xl font-bold text-slate-900 leading-tight">
+                      {dept.name}
+                    </h3>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-slate-100 px-2 py-0.5 rounded">
                         {dept.code}
                       </span>
                       <span className="text-xs font-bold text-slate-500">
-                        Head: {dept.head ? `${dept.head.first_name || dept.head.username}` : 'Unassigned'}
+                        Head:{" "}
+                        {dept.head
+                          ? `${dept.head.first_name || dept.head.username}`
+                          : "Unassigned"}
                       </span>
                     </div>
                   </div>
@@ -233,33 +478,45 @@ const Departments = () => {
 
               <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-6 mt-auto">
                 <div className="flex flex-col">
-                  <span className="text-2xl font-black text-slate-900">{dept.asset_count || 0}</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Tracked Assets</span>
+                  <span className="text-2xl font-black text-slate-900">
+                    {dept.asset_count || 0}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Tracked Assets
+                  </span>
                 </div>
                 <div className="flex flex-col">
-                  <span className="text-2xl font-black text-slate-900">N/A</span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Active Staff</span>
+                  <span className="text-2xl font-black text-slate-900">
+                    N/A
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Active Staff
+                  </span>
                 </div>
               </div>
 
-              <Can roles={['admin']}>
+              <Can roles={["admin"]}>
                 <div className="mt-6 flex gap-2">
-                  <button 
+                  <button
                     onClick={() => handleEdit(dept)}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold transition-all"
                   >
                     <Edit className="w-4 h-4" /> Edit
                   </button>
-                  <button 
+                  <button
                     onClick={() => handleDelete(dept)}
                     className={cn(
                       "px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center",
-                      dept.asset_count > 0 
-                        ? "bg-slate-50 text-slate-300 cursor-not-allowed" 
-                        : "bg-rose-50 hover:bg-rose-100 text-rose-600"
-                    )} 
+                      dept.asset_count > 0
+                        ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+                        : "bg-rose-50 hover:bg-rose-100 text-rose-600",
+                    )}
                     disabled={dept.asset_count > 0 || deleteDept.isPending}
-                    title={dept.asset_count > 0 ? "Cannot delete department with assigned assets" : "Delete department"}
+                    title={
+                      dept.asset_count > 0
+                        ? "Cannot delete department with assigned assets"
+                        : "Delete department"
+                    }
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -271,10 +528,10 @@ const Departments = () => {
       )}
 
       {isModalOpen && (
-        <DepartmentModal 
-          isOpen={isModalOpen} 
-          onClose={() => setIsModalOpen(false)} 
-          department={selectedDept} 
+        <DepartmentModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          department={selectedDept}
         />
       )}
     </div>

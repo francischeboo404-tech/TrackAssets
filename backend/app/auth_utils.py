@@ -30,8 +30,19 @@ def jwt_required_with_user(f):
     return decorated_function
 
 
+def normalize_role(role: str) -> str:
+    """Convert legacy aliases to canonical role names."""
+    return {
+        "staff": "logistics_officer",
+        "dept_head": "procurement_officer",
+        "viewer": "employee",
+    }.get(role, role)
+
+
 def require_role(*roles):
     """Decorator to require specific roles"""
+
+    normalized_required = tuple(normalize_role(role) for role in roles)
 
     def decorator(f):
         @wraps(f)
@@ -39,8 +50,10 @@ def require_role(*roles):
         def decorated_function(*args, **kwargs):
             from flask import g
 
-            # Allow admin and superadmin to bypass role checks
-            if g.user.role not in ("admin", "superadmin") and g.user.role not in roles:
+            current_role = normalize_role(g.user.role)
+            allowed_roles = ("admin", "superadmin") + normalized_required
+
+            if current_role not in allowed_roles:
                 raise AuthorizationError(
                     f"Role '{g.user.role}' not authorized. "
                     f"Required: {', '.join(roles)}"

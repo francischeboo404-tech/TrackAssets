@@ -73,10 +73,20 @@ class EventBus:
             if last_id > 0:
                 query = query.filter(SystemEvent.id > last_id)
 
-            events = query.order_by(SystemEvent.id.asc()).limit(50).all()
+            try:
+                events = query.order_by(SystemEvent.id.asc()).limit(50).all()
+            except Exception:
+                # If DB query fails, yield a heartbeat comment to keep connection alive
+                yield ": heartbeat\n\n"
+                time.sleep(1)
+                continue
 
             for event in events:
-                yield f"data: {json.dumps(event.to_dict())}\n\n"
+                try:
+                    yield f"data: {json.dumps(event.to_dict())}\n\n"
+                except Exception:
+                    # Fallback payload if serialization fails
+                    yield f"data: {json.dumps({'id': getattr(event,'id',None),'type': getattr(event,'event_type',None),'data': getattr(event,'data',None)})}\n\n"
                 last_id = event.id
                 last_check = event.created_at
 

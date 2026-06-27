@@ -1,7 +1,7 @@
 """Role-based rules for QR scan actions."""
 
 from app.errors import AuthorizationError
-from app.rbac import is_read_only_role, is_privileged
+from app.rbac import is_read_only_role, is_privileged, normalize_role
 
 # Spec mapping: Logistics → staff/store_manager; Viewer → read-only verify/audit
 SCAN_ACTION_ROLES = {
@@ -21,6 +21,7 @@ READ_ONLY_ACTIONS = frozenset({"VERIFY", "AUDIT"})
 
 def assert_can_scan(role: str, action_type: str):
     action = (action_type or "").upper()
+    role = normalize_role(role)
     if is_privileged(role):
         return
     allowed = SCAN_ACTION_ROLES.get(action)

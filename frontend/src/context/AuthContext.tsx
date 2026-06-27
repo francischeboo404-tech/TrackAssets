@@ -1,6 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import api, { clearAuthTokens } from '../services/api';
-import { hasStoredSession } from '../lib/authStorage';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
+import api, { clearAuthTokens } from "../services/api";
+import { hasStoredSession } from "../lib/authStorage";
+import { roleHasPermission } from "../lib/rbac";
 
 interface User {
   id: number;
@@ -14,24 +21,29 @@ interface AuthContextType {
   loading: boolean;
   login: (token: string, userData: User) => void;
   logout: () => Promise<void>;
+  hasPermission: (permission: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function mapUserPayload(data: Record<string, unknown> | null | undefined): User | null {
-  if (!data || typeof data.id !== 'number') {
+function mapUserPayload(
+  data: Record<string, unknown> | null | undefined,
+): User | null {
+  if (!data || typeof data.id !== "number") {
     return null;
   }
 
   return {
     id: data.id,
-    username: String(data.username ?? ''),
-    role: String(data.role ?? 'staff'),
+    username: String(data.username ?? ""),
+    role: String(data.role ?? "staff"),
     organisation_id: Number(data.organisation_id ?? 0),
   };
 }
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -39,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const sessionConfig = { skipAuthRedirect: true } as const;
 
     try {
-      const resp = await api.get('/auth/me', sessionConfig);
+      const resp = await api.get("/auth/me", sessionConfig);
       const payload = resp.data as Record<string, unknown>;
 
       if (payload?.authenticated === false) {
@@ -48,7 +60,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
       } else {
-        const mapped = mapUserPayload(payload.user ? (payload.user as Record<string, unknown>) : payload);
+        const mapped = mapUserPayload(
+          payload.user ? (payload.user as Record<string, unknown>) : payload,
+        );
         if (mapped) {
           setUser(mapped);
           return;
@@ -63,14 +77,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (hasStoredSession()) {
       try {
-        const refreshResp = await api.post('/auth/refresh', {}, sessionConfig);
+        const refreshResp = await api.post("/auth/refresh", {}, sessionConfig);
         if (refreshResp.data?.refreshed === false) {
           clearAuthTokens();
           setUser(null);
           return;
         }
 
-        const retry = await api.get('/auth/me', sessionConfig);
+        const retry = await api.get("/auth/me", sessionConfig);
         const retryPayload = retry.data as Record<string, unknown>;
         if (retryPayload?.authenticated === false) {
           clearAuthTokens();
@@ -79,7 +93,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const mapped = mapUserPayload(
-          retryPayload.user ? (retryPayload.user as Record<string, unknown>) : retryPayload,
+          retryPayload.user
+            ? (retryPayload.user as Record<string, unknown>)
+            : retryPayload,
         );
         if (mapped) {
           setUser(mapped);
@@ -110,13 +126,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [checkSession]);
 
+  const hasPermission = useCallback(
+    (permission: string) => roleHasPermission(user?.role, permission),
+    [user],
+  );
+
   const login = (_token: string, userData: User) => {
     setUser(userData);
   };
 
   const logout = async () => {
     try {
-      await api.post('/auth/logout', {}, { skipAuthRedirect: true } as const);
+      await api.post("/auth/logout", {}, { skipAuthRedirect: true } as const);
     } catch {
       // Clear local state even if the server session is already gone.
     } finally {
@@ -126,7 +147,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, logout, hasPermission }}
+    >
       {!loading && children}
     </AuthContext.Provider>
   );
@@ -135,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 };

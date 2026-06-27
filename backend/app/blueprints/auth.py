@@ -16,7 +16,8 @@ from flask_jwt_extended import (
     verify_jwt_in_request,
 )
 
-from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from app import limiter
 from flask_limiter.util import get_remote_address
 
 from app import db
@@ -35,7 +36,7 @@ from app.cors_utils import preflight_response
 auth_bp = Blueprint("auth", __name__)
 
 # Rate limiting for auth endpoints
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @auth_bp.route("/register-org", methods=["OPTIONS"])

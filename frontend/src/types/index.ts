@@ -2,7 +2,17 @@
  * Core enterprise entity types for TrackIT
  */
 
-export type UserRole = 'admin' | 'staff' | 'viewer' | 'auditor' | 'dept_head' | 'store_manager';
+export type UserRole =
+  | 'superadmin'
+  | 'admin'
+  | 'store_manager'
+  | 'logistics_officer'
+  | 'procurement_officer'
+  | 'employee'
+  | 'viewer'
+  | 'auditor'
+  | 'dept_head'
+  | 'staff';
 
 export interface User {
   id: number;
@@ -23,6 +33,39 @@ export interface InventoryItem {
   unit_price: number;
   unit: string;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // New procurement and traceability fields
+  category_id?: number;
+  item_type?: 'consumable' | 'asset' | 'raw' | 'finished' | 'service';
+  status?: string;
+  preferred_supplier_id?: number;
+  supplier_item_reference?: string;
+  purchase_cost?: number;
+  last_purchase_cost?: number;
+  tax_category?: string;
+  lead_time_days?: number;
+  min_stock_level?: number;
+  max_stock_level?: number;
+  safety_stock?: number;
+  opening_stock?: number;
+  batch_tracking?: boolean;
+  serial_tracking?: boolean;
+  expiry_tracking?: boolean;
+}
+
+export interface InventoryBatch {
+  id: number;
+  batch_number: string;
+  item_id: number;
+  quantity: number;
+  warehouse_id?: number;
+  received_date: string;
+  manufacture_date?: string;
+  expiry_date?: string;
+  supplier_id?: number;
+  status: 'available' | 'reserved' | 'used' | 'expired' | 'discarded';
+  is_expired: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -72,6 +72,23 @@ class InventoryRepository:
             reorder_level=data.get("reorder_level", 10),
             unit_price=data["unit_price"],
             unit=data.get("unit", "pcs"),
+            # persist extended fields if provided
+            category_id=data.get("category_id"),
+            item_type=data.get("item_type"),
+            status=data.get("status"),
+            preferred_supplier_id=data.get("preferred_supplier_id"),
+            supplier_item_reference=data.get("supplier_item_reference"),
+            purchase_cost=data.get("purchase_cost"),
+            last_purchase_cost=data.get("last_purchase_cost"),
+            tax_category=data.get("tax_category"),
+            lead_time_days=data.get("lead_time_days"),
+            min_stock_level=data.get("min_stock_level"),
+            max_stock_level=data.get("max_stock_level"),
+            safety_stock=data.get("safety_stock"),
+            opening_stock=data.get("opening_stock"),
+            batch_tracking=data.get("batch_tracking", False),
+            serial_tracking=data.get("serial_tracking", False),
+            expiry_tracking=data.get("expiry_tracking", False),
         )
         sess.add(new_item)
         return new_item
@@ -150,4 +167,140 @@ class InventoryRepository:
                 "stock_in": movements_summary.get("IN", 0),
                 "stock_out": movements_summary.get("OUT", 0),
             },
+        }
+
+
+class InventoryBatchRepository:
+    """Repository encapsulating ORM queries for inventory batches."""
+
+    def list_batches(self, org_id, page=1, per_page=50, search=None, item_id=None, status=None, show_expired=False):
+        """List batches for an organization with optional filters"""
+        query = inventory.InventoryBatch.query.filter_by(organisation_id=org_id)
+
+        if item_id:
+            query = query.filter_by(item_id=item_id)
+
+        if status:
+            query = query.filter_by(status=status)
+
+        if search:
+            query = query.filter(
+                db.or_(
+                    inventory.InventoryBatch.batch_number.ilike(f"%{search}%"),
+                )
+            )
+
+        if not show_expired:
+            # Only show non-expired batches
+            from datetime import datetime
+            query = query.filter(
+                db.or_(
+                    inventory.InventoryBatch.expiry_date == None,
+                    inventory.InventoryBatch.expiry_date > datetime.utcnow()
+                )
+            )
+
+        query = query.order_by(inventory.InventoryBatch.created_at.desc())
+        return query.paginate(page=page, per_page=per_page, error_out=False)
+
+    def get_batch(self, batch_id, org_id):
+        """Get a specific batch"""
+        return inventory.InventoryBatch.query.filter_by(
+            id=batch_id, organisation_id=org_id
+        ).first()
+
+    def get_batch_by_number(self, batch_number, item_id, org_id):
+        """Get batch by batch number and item"""
+        return inventory.InventoryBatch.query.filter_by(
+            batch_number=batch_number, item_id=item_id, organisation_id=org_id
+        ).first()
+
+    def create_batch(self, org_id, data, session=None):
+        """Create a new batch"""
+        sess = session or db.session
+        new_batch = inventory.InventoryBatch(
+            organisation_id=org_id,
+            batch_number=data["batch_number"],
+            item_id=data["item_id"],
+            quantity=data.get("quantity", 0),
+            warehouse_id=data.get("warehouse_id"),
+            received_date=data.get("received_date"),
+            manufacture_date=data.get("manufacture_date"),
+            expiry_date=data.get("expiry_date"),
+            supplier_id=data.get("supplier_id"),
+            status=data.get("status", "available"),
+        )
+        sess.add(new_batch)
+        return new_batch
+
+    def update_batch(self, batch, update_fields, session=None):
+        """Update a batch"""
+        sess = session or db.session
+        for field, value in update_fields.items():
+            if field in ['batch_number', 'quantity', 'warehouse_id', 'received_date', 
+                        'manufacture_date', 'expiry_date', 'supplier_id', 'status']:
+                setattr(batch, field, value)
+        batch.updated_at = db.func.now()
+        return batch
+
+    def delete_batch(self, batch, session=None):
+        """Delete a batch"""
+        sess = session or db.session
+        sess.delete(batch)
+        return batch
+
+    def get_expiring_batches(self, org_id, days_until_expiry=30):
+        """Get batches expiring within specified days"""
+        from datetime import datetime, timedelta
+        future_date = datetime.utcnow() + timedelta(days=days_until_expiry)
+        return inventory.InventoryBatch.query.filter(
+            inventory.InventoryBatch.organisation_id == org_id,
+            inventory.InventoryBatch.expiry_date.isnot(None),
+            inventory.InventoryBatch.expiry_date <= future_date,
+            inventory.InventoryBatch.status == 'available'
+        ).order_by(inventory.InventoryBatch.expiry_date.asc()).all()
+
+    def get_expired_batches(self, org_id):
+        """Get all expired batches"""
+        from datetime import datetime
+        return inventory.InventoryBatch.query.filter(
+            inventory.InventoryBatch.organisation_id == org_id,
+            inventory.InventoryBatch.expiry_date.isnot(None),
+            inventory.InventoryBatch.expiry_date < datetime.utcnow()
+        ).all()
+
+    def batch_stats(self, org_id):
+        """Get batch statistics"""
+        total_batches = inventory.InventoryBatch.query.filter_by(
+            organisation_id=org_id
+        ).count()
+
+        total_batch_quantity = (
+            db.session.query(db.func.sum(inventory.InventoryBatch.quantity))
+            .filter_by(organisation_id=org_id)
+            .scalar() or 0
+        )
+
+        # Count expiring soon (30 days)
+        from datetime import datetime, timedelta
+        future_date = datetime.utcnow() + timedelta(days=30)
+        expiring_soon = inventory.InventoryBatch.query.filter(
+            inventory.InventoryBatch.organisation_id == org_id,
+            inventory.InventoryBatch.expiry_date.isnot(None),
+            inventory.InventoryBatch.expiry_date <= future_date,
+            inventory.InventoryBatch.expiry_date > datetime.utcnow()
+        ).count()
+
+        # Count expired
+        expired = inventory.InventoryBatch.query.filter(
+            inventory.InventoryBatch.organisation_id == org_id,
+            inventory.InventoryBatch.expiry_date.isnot(None),
+            inventory.InventoryBatch.expiry_date < datetime.utcnow()
+        ).count()
+
+        return {
+            "total_batches": total_batches,
+            "total_batch_quantity": total_batch_quantity,
+            "expiring_soon_count": expiring_soon,
+            "expired_count": expired,
         }

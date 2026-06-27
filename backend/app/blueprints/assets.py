@@ -1,6 +1,6 @@
 from flask import Blueprint, g, jsonify, request, send_file
-from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from app import limiter
 
 from app import db
 from app.auth_utils import (
@@ -38,8 +38,7 @@ from app.utils.bulk_qr import generate_bulk_qr_pdf
 
 assets_bp = Blueprint("assets", __name__)
 
-# Rate limiting
-limiter = Limiter(key_func=get_remote_address)
+# Use application-wide rate limiter
 
 
 @assets_bp.route("", methods=["GET"])

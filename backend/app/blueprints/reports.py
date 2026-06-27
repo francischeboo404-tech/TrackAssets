@@ -19,9 +19,9 @@ def _report_json(data, message="Report generated successfully"):
 
 
 def _department_scope():
-    """Department name filter for dept_head users."""
+    """Department name filter for procurement_officer / dept_head users."""
     role = getattr(g.user, "role", None)
-    if role == "dept_head" and getattr(g.user, "department", None):
+    if role in ("dept_head", "procurement_officer") and getattr(g.user, "department", None):
         return g.user.department
     return None
 

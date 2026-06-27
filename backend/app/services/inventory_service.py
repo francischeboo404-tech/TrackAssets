@@ -16,6 +16,27 @@ class InventoryService:
     data access. It does not alter response shapes — controllers remain
     responsible for formatting responses.
     """
+    @staticmethod
+    def sync_total_stock(item_id):
+
+        total = (
+            db.session.query(
+                db.func.coalesce(
+                    db.func.sum(WarehouseStock.quantity_on_hand),
+                    0
+                )
+            )
+            .filter(WarehouseStock.item_id == item_id)
+            .scalar()
+        )
+
+        item = InventoryItem.query.get(item_id)
+
+        item.quantity = total
+
+        db.session.flush()
+
+        
 
     def __init__(self, repository: InventoryRepository = None, session=None):
         self.repo = repository or InventoryRepository()
@@ -110,6 +131,27 @@ class InventoryService:
             ]
         }
 
+        # include newly added fields in auditable old values
+        for extra in [
+            "category_id",
+            "item_type",
+            "status",
+            "preferred_supplier_id",
+            "supplier_item_reference",
+            "purchase_cost",
+            "last_purchase_cost",
+            "tax_category",
+            "lead_time_days",
+            "min_stock_level",
+            "max_stock_level",
+            "safety_stock",
+            "opening_stock",
+            "batch_tracking",
+            "serial_tracking",
+            "expiry_tracking",
+        ]:
+            old_values[extra] = getattr(item, extra, None)
+
         if "quantity" in data:
             raise ValidationError(
                 "Quantity cannot be edited directly; use stock movements"
@@ -129,6 +171,23 @@ class InventoryService:
                     "reorder_level",
                     "unit_price",
                     "unit",
+                    # allow updates to extended fields
+                    "category_id",
+                    "item_type",
+                    "status",
+                    "preferred_supplier_id",
+                    "supplier_item_reference",
+                    "purchase_cost",
+                    "last_purchase_cost",
+                    "tax_category",
+                    "lead_time_days",
+                    "min_stock_level",
+                    "max_stock_level",
+                    "safety_stock",
+                    "opening_stock",
+                    "batch_tracking",
+                    "serial_tracking",
+                    "expiry_tracking",
                 ]
                 if k in data
             }
@@ -210,8 +269,81 @@ class InventoryService:
             event_bus.publish("STOCK_UPDATE", {"item_id": item.id, "movement_type": movement_type, "quantity": qty_change}, organisation_id=org_id)
             
             return item
-        except ValueError as e:
-            raise ConflictError(str(e))
+        except Exception as e:
+            current_app.logger.exception(e)
+
+            self.session.rollback()
+
+            raise
+
+
+    @transaction_retry(max_retries=3)
+    def update_stock_batch(
+        self,
+        org_id,
+        movements,
+        user_id=None,
+    ):
+        """
+        Batch stock update used during GRN approval.
+        """
+
+        updated_items = []
+
+        for movement in movements:
+
+            item = (
+                inventory.InventoryItem.query
+                .with_for_update()
+                .filter_by(
+                    id=movement["item_id"],
+                    organisation_id=org_id
+                )
+                .first()
+            )
+
+            if not item:
+                raise NotFoundError(
+                    f"Inventory item {movement['item_id']} not found"
+                )
+
+            qty = int(movement["quantity"])
+
+            item.add_stock(
+                qty,
+                warehouse_id=movement.get("warehouse_id"),
+                reference=movement.get("reference"),
+                notes=movement.get("notes"),
+            )
+
+            if movement.get("unit_cost") is not None:
+                item.last_purchase_cost = movement["unit_cost"]
+
+                if not item.purchase_cost:
+                    item.purchase_cost = movement["unit_cost"]
+
+            AuditService.log_inventory_change(
+                item,
+                "STOCK_INCREASED",
+                quantity_change=qty,
+                reference=movement.get("reference"),
+                session=self.session,
+            )
+
+            updated_items.append(item.id)
+
+        self.session.flush()
+
+        event_bus.publish(
+            "STOCK_BATCH_UPDATED",
+            {
+                "items": updated_items
+            },
+            organisation_id=org_id,
+        )
+
+        return updated_items
+
 
     @transaction_retry(max_retries=3)
     def delete_item(self, item_id, org_id):
@@ -240,3 +372,173 @@ class InventoryService:
 
     def stats(self, org_id):
         return self.repo.stats(org_id)
+
+
+class InventoryBatchService:
+    """Service layer for inventory batch operations"""
+
+    def __init__(self, batch_repo=None, session=None):
+        from app.repositories.inventory_repository import InventoryBatchRepository
+        self.batch_repo = batch_repo or InventoryBatchRepository()
+        self.item_repo = InventoryRepository()
+        self.session = session or db.session
+
+    def list_batches(self, org_id, page=1, per_page=50, search=None, item_id=None, status=None, show_expired=False):
+        """List batches with filters"""
+        return self.batch_repo.list_batches(
+            org_id, page=page, per_page=per_page, search=search, 
+            item_id=item_id, status=status, show_expired=show_expired
+        )
+
+    def get_batch(self, batch_id, org_id):
+        """Get a specific batch"""
+        batch = self.batch_repo.get_batch(batch_id, org_id)
+        if not batch:
+            raise NotFoundError("Batch not found")
+        return batch
+
+    @transaction_retry(max_retries=3)
+    def create_batch(self, org_id, validated_data):
+        """Create a new batch"""
+        current_app.logger.debug(
+            "create_batch called",
+            extra={"org_id": org_id, "item_id": validated_data.get("item_id")}
+        )
+
+        # Validate item exists
+        item = self.item_repo.get_item(validated_data["item_id"], org_id)
+        if not item:
+            raise NotFoundError("Inventory item not found")
+
+        # Check batch number uniqueness
+        existing = self.batch_repo.get_batch_by_number(
+            validated_data["batch_number"], 
+            validated_data["item_id"], 
+            org_id
+        )
+        if existing:
+            raise ConflictError("Batch number already exists for this item")
+
+        batch = self.batch_repo.create_batch(org_id, validated_data, session=self.session)
+        
+        AuditService.log_action(
+            action="BATCH_CREATED",
+            entity_type="inventory_batch",
+            entity_id=batch.id,
+            details={
+                "batch_number": batch.batch_number,
+                "item_id": batch.item_id,
+                "quantity": batch.quantity,
+                "expiry_date": batch.expiry_date.isoformat() if batch.expiry_date else None
+            },
+            organisation_id=org_id,
+            session=self.session,
+        )
+
+        try:
+            self.session.commit()
+        except Exception as e:
+            current_app.logger.error("create_batch: commit failed", extra={"error": str(e)})
+            self.session.rollback()
+            raise
+
+        event_bus.publish(
+            "BATCH_CREATED", 
+            {"batch_id": batch.id, "batch_number": batch.batch_number, "item_id": batch.item_id},
+            organisation_id=org_id
+        )
+
+        current_app.logger.info("create_batch: success", extra={"batch_id": batch.id})
+        return batch
+
+    @transaction_retry(max_retries=3)
+    def update_batch(self, batch_id, org_id, validated_data):
+        """Update a batch"""
+        batch = self.batch_repo.get_batch(batch_id, org_id)
+        if not batch:
+            raise NotFoundError("Batch not found")
+
+        old_values = {
+            k: getattr(batch, k) for k in ["batch_number", "quantity", "status", "expiry_date"]
+        }
+
+        updatable_fields = {
+            k: validated_data[k]
+            for k in ["batch_number", "quantity", "warehouse_id", "status", "expiry_date"]
+            if k in validated_data
+        }
+
+        try:
+            self.batch_repo.update_batch(batch, updatable_fields, session=self.session)
+
+            AuditService.log_action(
+                action="BATCH_UPDATED",
+                entity_type="inventory_batch",
+                entity_id=batch.id,
+                details={
+                    "old_values": old_values,
+                    "new_values": {k: getattr(batch, k) for k in old_values.keys()}
+                },
+                organisation_id=org_id,
+                session=self.session,
+            )
+
+            self.session.commit()
+            
+            event_bus.publish(
+                "BATCH_UPDATED",
+                {"batch_id": batch.id, "batch_number": batch.batch_number},
+                organisation_id=org_id
+            )
+
+            return batch
+        except Exception:
+            self.session.rollback()
+            raise
+
+    @transaction_retry(max_retries=3)
+    def delete_batch(self, batch_id, org_id):
+        """Delete a batch"""
+        batch = self.batch_repo.get_batch(batch_id, org_id)
+        if not batch:
+            raise NotFoundError("Batch not found")
+
+        batch_id_temp = batch.id
+        batch_number = batch.batch_number
+
+        try:
+            self.batch_repo.delete_batch(batch, session=self.session)
+
+            AuditService.log_action(
+                action="BATCH_DELETED",
+                entity_type="inventory_batch",
+                entity_id=batch_id_temp,
+                details={"batch_number": batch_number},
+                organisation_id=org_id,
+                session=self.session,
+            )
+
+            self.session.commit()
+            
+            event_bus.publish(
+                "BATCH_DELETED",
+                {"batch_id": batch_id_temp, "batch_number": batch_number},
+                organisation_id=org_id
+            )
+
+            return {"message": "Batch deleted successfully"}
+        except Exception:
+            self.session.rollback()
+            raise
+
+    def get_expiring_batches(self, org_id, days=30):
+        """Get batches expiring within specified days"""
+        return self.batch_repo.get_expiring_batches(org_id, days_until_expiry=days)
+
+    def get_expired_batches(self, org_id):
+        """Get all expired batches"""
+        return self.batch_repo.get_expired_batches(org_id)
+
+    def batch_stats(self, org_id):
+        """Get batch statistics"""
+        return self.batch_repo.batch_stats(org_id)

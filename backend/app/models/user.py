@@ -103,6 +103,30 @@ class User(UserMixin, db.Model):
                 "users:view",
                 "reports:view",
             ],
+            "logistics_officer": [
+                "assets:view",
+                "assets:create",
+                "assets:edit",
+                "assets:transition",
+                "inventory:view",
+                "inventory:stock",
+                "transfers:create",
+                "transfers:view",
+                "warehouses:view",
+            ],
+            "procurement_officer": [
+                "assets:view",
+                "assets:approve",
+                "assets:transition",
+                "transfers:approve",
+                "transfers:create",
+                "transfers:view",
+                "reports:view",
+            ],
+            "employee": [
+                "assets:view", "inventory:view", "warehouses:view", "reports:view"
+            ],
+            # legacy aliases for compatibility with older DB records
             "staff": [
                 "assets:view",
                 "assets:create",

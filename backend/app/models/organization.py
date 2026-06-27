@@ -68,6 +68,9 @@ class Department(db.Model):
     code = db.Column(db.String(50), nullable=False)
     description = db.Column(db.Text)
     head_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    allowed_category_ids = db.Column(db.JSON, default=list)
+    allowed_inventory_item_types = db.Column(db.JSON, default=list)
+    allowed_asset_types = db.Column(db.JSON, default=list)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(

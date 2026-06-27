@@ -14,6 +14,9 @@ export interface Department {
     last_name: string;
   };
   asset_count: number;
+  allowed_category_ids?: number[];
+  allowed_inventory_item_types?: Array<'consumable' | 'asset' | 'raw' | 'finished' | 'service'>;
+  allowed_asset_types?: string[];
 }
 
 export const useDepartments = (params: any = {}) => {

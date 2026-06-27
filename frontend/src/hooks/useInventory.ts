@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
-import type { InventoryItem, StockUpdate } from '../types';
+import type { InventoryItem, InventoryBatch, StockUpdate } from '../types';
 
 export const useInventory = (params: any = {}) => {
   return useQuery({
@@ -79,6 +79,20 @@ export const useBulkImportInventory = () => {
   });
 };
 
+export const useBatchUpdateStock = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (rows: any[]) => {
+      const response = await api.post('/inventory/batch', { rows });
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+};
+
 export const useDeleteInventoryItem = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -89,6 +103,92 @@ export const useDeleteInventoryItem = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+    },
+  });
+};
+
+// ============ BATCH HOOKS ============
+
+export const useBatches = (params: any = {}) => {
+  return useQuery({
+    queryKey: ['inventory-batches', params],
+    queryFn: async () => {
+      const response = await api.get<{ batches: InventoryBatch[], pagination: any }>('/inventory/batches', { params });
+      return response.data;
+    },
+  });
+};
+
+export const useBatch = (batchId: number | null) => {
+  return useQuery({
+    queryKey: ['inventory-batch', batchId],
+    queryFn: async () => {
+      if (!batchId) throw new Error('Batch ID required');
+      const response = await api.get<InventoryBatch>(`/inventory/batches/${batchId}`);
+      return response.data;
+    },
+    enabled: !!batchId,
+  });
+};
+
+export const useCreateBatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: Partial<InventoryBatch>) => {
+      const response = await api.post('/inventory/batches', data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-batches'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+};
+
+export const useUpdateBatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...data }: Partial<InventoryBatch> & { id: number }) => {
+      const response = await api.put(`/inventory/batches/${id}`, data);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-batches'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+};
+
+export const useDeleteBatch = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const response = await api.delete(`/inventory/batches/${id}`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory-batches'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory'] });
+    },
+  });
+};
+
+export const useExpiringBatches = (params: any = {}) => {
+  return useQuery({
+    queryKey: ['expiring-batches', params],
+    queryFn: async () => {
+      const response = await api.get<{ expiring_batches: InventoryBatch[], count: number }>('/inventory/batches/expiring', { params });
+      return response.data;
+    },
+  });
+};
+
+export const useBatchStats = () => {
+  return useQuery({
+    queryKey: ['batch-stats'],
+    queryFn: async () => {
+      const response = await api.get('/inventory/batches/stats');
+      return response.data;
     },
   });
 };

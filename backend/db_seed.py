@@ -20,99 +20,84 @@ def seed_database():
         # db.drop_all()
         # db.create_all()
         
-        print("Creating organizations...")
-        org1 = Organization(
-            name='Tech Corp',
-            code='TECHCORP',
-            description='Technology corporation'
-        )
-        org2 = Organization(
-            name='Manufacturing Inc',
-            code='MFGINC',
-            description='Manufacturing company'
-        )
-        db.session.add_all([org1, org2])
+        print("Creating organizations (skip existing)...")
+        # Upsert organizations by `code` to avoid duplicate key errors
+        org1 = Organization.query.filter_by(code='TECHCORP').first()
+        if not org1:
+            org1 = Organization(
+                name='Tech Corp',
+                code='TECHCORP',
+                description='Technology corporation'
+            )
+            db.session.add(org1)
+        else:
+            print("  - TECHCORP exists, using existing record")
+
+        org2 = Organization.query.filter_by(code='MFGINC').first()
+        if not org2:
+            org2 = Organization(
+                name='Manufacturing Inc',
+                code='MFGINC',
+                description='Manufacturing company'
+            )
+            db.session.add(org2)
+        else:
+            print("  - MFGINC exists, using existing record")
+
         db.session.commit()
         
-        print("Creating departments...")
-        dept_it = Department(
-            organisation_id=org1.id,
-            name='Information Technology',
-            code='IT',
-            description='IT Department'
-        )
-        dept_hr = Department(
-            organisation_id=org1.id,
-            name='Human Resources',
-            code='HR',
-            description='HR Department'
-        )
-        dept_ops = Department(
-            organisation_id=org2.id,
-            name='Operations',
-            code='OPS',
-            description='Operations Department'
-        )
-        db.session.add_all([dept_it, dept_hr, dept_ops])
-        db.session.commit()
+        print("Creating departments (skip existing)...")
+        def get_or_create_dept(org_id, code, name, description):
+            d = Department.query.filter_by(organisation_id=org_id, code=code).first()
+            if d:
+                return d
+            d = Department(organisation_id=org_id, name=name, code=code, description=description)
+            db.session.add(d)
+            db.session.commit()
+            return d
+
+        dept_it = get_or_create_dept(org1.id, 'IT', 'Information Technology', 'IT Department')
+        dept_hr = get_or_create_dept(org1.id, 'HR', 'Human Resources', 'HR Department')
+        dept_ops = get_or_create_dept(org2.id, 'OPS', 'Operations', 'Operations Department')
         
-        print("Creating users...")
-        admin = User(
-            organisation_id=org1.id,
-            username='admin',
-            email='admin@techcorp.com',
-            first_name='Admin',
-            last_name='User',
-            role='admin'
-        )
-        admin.set_password('Admin123!')
-        
-        staff = User(
-            organisation_id=org1.id,
-            username='staff1',
-            email='staff1@techcorp.com',
-            first_name='Staff',
-            last_name='One',
-            role='staff'
-        )
-        staff.set_password('Staff123!')
-        
-        dept_head = User(
-            organisation_id=org1.id,
-            username='depthead',
-            email='depthead@techcorp.com',
-            first_name='Dept',
-            last_name='Head',
-            role='dept_head'
-        )
-        dept_head.set_password('Head123!')
-        dept_it.head_id = dept_head.id
-        
-        store_mgr = User(
-            organisation_id=org2.id,
-            username='storemmgr',
-            email='storemgr@mfginc.com',
-            first_name='Store',
-            last_name='Manager',
-            role='store_manager'
-        )
-        store_mgr.set_password('Store123!')
-        
-        db.session.add_all([admin, staff, dept_head, store_mgr])
-        db.session.commit()
+        print("Creating users (skip existing)...")
+        def get_or_create_user(org_id, username, email, first_name, last_name, role, password):
+            u = User.query.filter_by(email=email).first()
+            if u:
+                return u
+            u = User(organisation_id=org_id, username=username, email=email, first_name=first_name, last_name=last_name, role=role)
+            u.set_password(password)
+            db.session.add(u)
+            db.session.commit()
+            return u
+
+        admin = get_or_create_user(org1.id, 'admin', 'admin@techcorp.com', 'Admin', 'User', 'admin', 'Admin123!')
+        staff = get_or_create_user(org1.id, 'staff1', 'staff1@techcorp.com', 'Staff', 'One', 'staff', 'Staff123!')
+        dept_head = get_or_create_user(org1.id, 'depthead', 'depthead@techcorp.com', 'Dept', 'Head', 'dept_head', 'Head123!')
+        store_mgr = get_or_create_user(org2.id, 'storemmgr', 'storemgr@mfginc.com', 'Store', 'Manager', 'store_manager', 'Store123!')
+
+        # Ensure department head relationship is set
+        if dept_it.head_id != dept_head.id:
+            dept_it.head_id = dept_head.id
+            db.session.add(dept_it)
+            db.session.commit()
 
         # Create global superadmin (can manage roles and system-wide settings)
-        superadmin = User(
-            organisation_id=org1.id,
-            username='Frank',
-            email='frankadmin@trackit.com',
-            first_name='Frank',
-            last_name='Administrator',
-            role='superadmin'
-        )
-        superadmin.set_password('P@55w0rd123!_')
-        db.session.add(superadmin)
-        db.session.commit()
+        superadmin = User.query.filter_by(organisation_id=org1.id, email='frankadmin@trackit.com').first()
+        if not superadmin:
+            superadmin = User(
+                organisation_id=org1.id,
+                username='Frank',
+                email='frankadmin@trackit.com',
+                first_name='Frank',
+                last_name='Administrator',
+                role='superadmin'
+            )
+            superadmin.set_password('P@55w0rd123!_')
+            db.session.add(superadmin)
+            db.session.commit()
+        else:
+            print("  - superadmin exists, using existing record")
         
         print("Creating assets...")
         today = datetime.utcnow().date()
@@ -154,34 +139,35 @@ def seed_database():
         
         asset1.update_current_value()
         
-        db.session.add_all([asset1, asset2])
-        db.session.commit()
+        try:
+            db.session.add_all([asset1, asset2])
+            db.session.commit()
+        except Exception as e:
+            # Some environments may have an older schema; log and continue
+            print("  - Skipping asset creation due to schema mismatch:", str(e))
+            db.session.rollback()
         
-        print("Creating inventory items...")
-        inv1 = InventoryItem(
-            organisation_id=org1.id,
-            name='Office Paper A4',
-            sku='PAPER-A4',
-            description='White paper 80gsm',
-            quantity=500,
-            reorder_level=100,
-            unit_price=2500.00,
-            unit='box'
-        )
-        
-        inv2 = InventoryItem(
-            organisation_id=org1.id,
-            name='Printer Cartridges',
-            sku='INK-BLK',
-            description='Black ink cartridges',
-            quantity=5,
-            reorder_level=10,
-            unit_price=3500.00,
-            unit='piece'
-        )
-        
-        db.session.add_all([inv1, inv2])
-        db.session.commit()
+        print("Creating inventory items (skip existing)...")
+        def get_or_create_item(org_id, sku, name, description, quantity, reorder_level, unit_price, unit):
+            it = InventoryItem.query.filter_by(organisation_id=org_id, sku=sku).first()
+            if it:
+                return it
+            it = InventoryItem(
+                organisation_id=org_id,
+                name=name,
+                sku=sku,
+                description=description,
+                quantity=quantity,
+                reorder_level=reorder_level,
+                unit_price=unit_price,
+                unit=unit,
+            )
+            db.session.add(it)
+            db.session.commit()
+            return it
+
+        inv1 = get_or_create_item(org1.id, 'PAPER-A4', 'Office Paper A4', 'White paper 80gsm', 500, 100, 2500.00, 'box')
+        inv2 = get_or_create_item(org1.id, 'INK-BLK', 'Printer Cartridges', 'Black ink cartridges', 5, 10, 3500.00, 'piece')
         
         print("Creating stock movements...")
         mov1 = StockMovement(

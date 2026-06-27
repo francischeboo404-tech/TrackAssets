@@ -23,6 +23,20 @@ export const useWarehouseDetails = (id: number) => {
   });
 };
 
+export const useWarehouseBins = (warehouseId?: number, itemId?: number) => {
+  return useQuery({
+    queryKey: ['warehouse-bins', warehouseId, itemId],
+    queryFn: async () => {
+      if (!warehouseId) {
+        return [];
+      }
+      const response = await api.get(`/warehouses/${warehouseId}/bins`);
+      return response.data;
+    },
+    enabled: !!warehouseId,
+  });
+};
+
 export const useCreateWarehouse = () => {
   const queryClient = useQueryClient();
   return useMutation({
