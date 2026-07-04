@@ -1,5 +1,5 @@
 from datetime import datetime
-from flask import Blueprint, jsonify, Response, request
+from flask import Blueprint, jsonify, Response, request, g
 from app.auth_utils import (
     jwt_required_with_user,
     get_current_organisation_id,
@@ -9,6 +9,8 @@ from app.rbac import filter_analytics_payload, is_read_only_role
 from app.services.analytics_service import AnalyticsService
 from app.services.export_service import ExportService
 from app.services.event_bus import event_bus
+from flask_jwt_extended import decode_token
+from app.tenant_utils import get_user_by_id, is_token_revoked
 
 analytics_bp = Blueprint("analytics", __name__)
 
@@ -121,9 +123,54 @@ def export_valuation():
 
 
 @analytics_bp.route("/stream", methods=["GET"])
-@jwt_required_with_user
 def stream_events():
-    """Real-time event stream (SSE)."""
+    """Real-time event stream (SSE).
+
+    This endpoint accepts authentication via any of:
+    - cookies / Authorization header (standard JWT flow)
+    - `access_token` query parameter (useful for EventSource clients)
+    The view performs lightweight validation and attaches `g.user`.
+    """
+    from flask_jwt_extended import verify_jwt_in_request, get_jwt_identity
+
+    # 1) Try standard cookie/header JWT (optional)
+    try:
+        verify_jwt_in_request(optional=True)
+    except Exception:
+        # ignore, we'll fall back to query param
+        pass
+
+    user_obj = None
+    try:
+        identity = get_jwt_identity()
+        if identity:
+            user_obj = get_user_by_id(identity)
+    except Exception:
+        user_obj = None
+
+    # 2) If not authenticated via header/cookie, accept ?access_token=...
+    if not user_obj:
+        token = request.args.get("access_token")
+        if token:
+            try:
+                decoded = decode_token(token)
+            except Exception:
+                return jsonify({"success": False, "message": "Invalid token"}), 401
+
+            # Check blocklist
+            jti = decoded.get("jti")
+            if jti and is_token_revoked(jti):
+                return jsonify({"success": False, "message": "Token revoked"}), 401
+
+            identity = decoded.get("sub") or decoded.get("identity")
+            user_obj = get_user_by_id(identity)
+
+    if not user_obj:
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+    # Attach user to request context for downstream RBAC
+    g.user = user_obj
+
     org_id = get_current_organisation_id()
     try:
         gen = event_bus.stream(organisation_id=org_id)
