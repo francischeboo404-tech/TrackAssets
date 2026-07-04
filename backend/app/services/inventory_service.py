@@ -1,5 +1,7 @@
 from app import db
 from app.models import inventory
+from app.models.location_topology import Warehouse
+from app.models.stock_levels import WarehouseStock
 from app.audit_service import AuditService
 from app.repositories.inventory_repository import InventoryRepository
 from app.errors import NotFoundError, ConflictError, ValidationError
@@ -7,7 +9,8 @@ from app.db_utils import transaction_retry
 from app.services.event_bus import event_bus
 from app.services.qr_service import QRService
 from flask import current_app
-
+from app.services.stock_service import StockService
+from app.models.location_topology import Warehouse
 
 class InventoryService:
     """Service layer for inventory business logic.
@@ -16,25 +19,7 @@ class InventoryService:
     data access. It does not alter response shapes — controllers remain
     responsible for formatting responses.
     """
-    @staticmethod
-    def sync_total_stock(item_id):
-
-        total = (
-            db.session.query(
-                db.func.coalesce(
-                    db.func.sum(WarehouseStock.quantity_on_hand),
-                    0
-                )
-            )
-            .filter(WarehouseStock.item_id == item_id)
-            .scalar()
-        )
-
-        item = InventoryItem.query.get(item_id)
-
-        item.quantity = total
-
-        db.session.flush()
+    
 
         
 
@@ -43,7 +28,7 @@ class InventoryService:
         self.session = session or db.session
 
     def list_items(
-        self, org_id, page=1, per_page=50, search=None, low_stock_only=False
+        self, org_id, page=1, per_page=50, search=None, low_stock_only=False, department_id=None
     ):
         return self.repo.list_items(
             org_id,
@@ -51,6 +36,7 @@ class InventoryService:
             per_page=per_page,
             search=search,
             low_stock_only=low_stock_only,
+            department_id=department_id,
         )
 
     def get_item(self, item_id, org_id):
@@ -59,6 +45,54 @@ class InventoryService:
             raise NotFoundError("Inventory item not found")
         movements = self.repo.get_recent_movements(item_id, org_id)
         return item, movements
+
+    # ------------------------------------------------------------------
+    # Warehouse resolution helper
+    # ------------------------------------------------------------------
+    def _resolve_warehouse_id(self, org_id: int, validated_data: dict) -> int | None:
+        """Return a concrete warehouse_id for the organisation.
+
+        Resolution order:
+        1. ``warehouse_name`` in data  → look up by name (case-insensitive)
+        2. ``warehouse_id`` in data    → use directly after confirming it exists
+        3. Neither present             → return None
+
+        Raises ValidationError with a friendly message if the name or ID
+        cannot be matched to an active warehouse in this organisation.
+        """
+        warehouse_name = (validated_data.get("warehouse_name") or "").strip()
+        warehouse_id   = validated_data.get("warehouse_id")
+
+        if warehouse_name:
+            wh = (
+                db.session.query(Warehouse)
+                .filter(
+                    Warehouse.organisation_id == org_id,
+                    Warehouse.is_active == True,
+                    db.func.upper(Warehouse.name) == warehouse_name.upper(),
+                )
+                .first()
+            )
+            if not wh:
+                raise ValidationError(
+                    f"Warehouse '{warehouse_name}' not found in your organisation. "
+                    "Check the name matches exactly (e.g. 'MAIN WAREHOUSE')."
+                )
+            return wh.id
+
+        if warehouse_id:
+            wh = (
+                db.session.query(Warehouse)
+                .filter_by(id=warehouse_id, organisation_id=org_id, is_active=True)
+                .first()
+            )
+            if not wh:
+                raise ValidationError(
+                    f"Warehouse ID {warehouse_id} not found in your organisation."
+                )
+            return wh.id
+
+        return None
 
     @transaction_retry(max_retries=3)
     def create_item(self, org_id, validated_data):
@@ -75,9 +109,61 @@ class InventoryService:
             )
             raise ConflictError("SKU already exists")
 
+        # Resolve warehouse — prefer name lookup, fall back to ID, else None
+        resolved_warehouse_id = self._resolve_warehouse_id(org_id, validated_data)
+
+        # Inject resolved ID so the repository stores it on the item record
+        if resolved_warehouse_id:
+            validated_data = {**validated_data, "warehouse_id": resolved_warehouse_id}
+
+        requested_quantity = int(validated_data.get("quantity") or 0)
+        opening_stock = int(validated_data.get("opening_stock") or 0)
+        if "opening_stock" in validated_data:
+            validated_data = {k: v for k, v in validated_data.items() if k != "opening_stock"}
+
+        if resolved_warehouse_id is not None and "quantity" in validated_data:
+            # Warehouse stock is the source of truth for on-hand inventory.
+            # When an initial warehouse is provided, quantity should be created
+            # via a warehouse movement rather than stored only on the item row.
+            validated_data = {k: v for k, v in validated_data.items() if k != "quantity"}
+
         item = self.repo.create_item(
             org_id, validated_data, session=self.session
         )
+
+        if resolved_warehouse_id is not None and requested_quantity > 0 and opening_stock > 0:
+            raise ValidationError(
+                "Provide either quantity or opening_stock, not both, when creating an inventory item with a warehouse."
+            )
+
+        if requested_quantity > 0 and resolved_warehouse_id is not None:
+            StockService(session=self.session).increase_stock(
+                item_id=item.id,
+                org_id=org_id,
+                quantity=requested_quantity,
+                warehouse_id=resolved_warehouse_id,
+                reference="INITIAL_STOCK",
+                notes="Initial stock quantity",
+                commit=False,
+            )
+        elif opening_stock > 0:
+            if not resolved_warehouse_id:
+                raise ValidationError(
+                    "Opening stock requires a warehouse. "
+                    "Add a 'warehouse_name' column with the warehouse name "
+                    "(e.g. 'MAIN WAREHOUSE') or provide a valid warehouse_id."
+                )
+
+            StockService(session=self.session).increase_stock(
+                item_id=item.id,
+                org_id=org_id,
+                quantity=opening_stock,
+                warehouse_id=resolved_warehouse_id,
+                reference="OPENING_STOCK",
+                notes="Initial opening balance",
+                commit=False,
+            )
+
         QRService.ensure_inventory_qr(item)
         # Audit log (added to same session)
         AuditService.log_inventory_change(
@@ -115,9 +201,12 @@ class InventoryService:
             raise NotFoundError("Inventory item not found")
 
         # Check SKU uniqueness if changing
-        if "sku" in data and data["sku"] != item.sku:
-            if self.repo.exists_sku(org_id, data["sku"]):
-                raise ConflictError("SKU already exists")
+        if "sku" in data:
+            incoming_sku = (data.get("sku") or "").strip()
+            current_sku = (item.sku or "").strip()
+            if incoming_sku != current_sku:
+                if self.repo.exists_sku(org_id, incoming_sku, exclude_id=item.id):
+                    raise ConflictError("SKU already exists")
 
         old_values = {
             k: getattr(item, k)
@@ -146,6 +235,7 @@ class InventoryService:
             "max_stock_level",
             "safety_stock",
             "opening_stock",
+            "warehouse_id",
             "batch_tracking",
             "serial_tracking",
             "expiry_tracking",
@@ -185,6 +275,7 @@ class InventoryService:
                     "max_stock_level",
                     "safety_stock",
                     "opening_stock",
+                    "warehouse_id",
                     "batch_tracking",
                     "serial_tracking",
                     "expiry_tracking",
@@ -229,6 +320,7 @@ class InventoryService:
         movement_type,
         quantity,
         warehouse_id=None,
+        destination_warehouse_id=None,
         reference=None,
         notes=None,
     ):
@@ -242,14 +334,88 @@ class InventoryService:
             raise NotFoundError("Inventory item not found")
 
         try:
-            if movement_type == "IN":
-                item.add_stock(quantity, warehouse_id=warehouse_id, reference=reference, notes=notes)
+            stock_service = StockService(session=self.session)
+
+            # Handle warehouse transfer: decrease from source, increase to destination
+            if destination_warehouse_id is not None:
+                if movement_type != "OUT":
+                    raise ValidationError(
+                        "Warehouse transfers must use movement type 'OUT' from source warehouse"
+                    )
+                if not warehouse_id:
+                    raise ValidationError(
+                        "Source warehouse_id is required for transfers"
+                    )
+
+                source_wh = (
+                    self.session.query(Warehouse)
+                    .filter_by(id=warehouse_id, organisation_id=org_id, is_active=True)
+                    .first()
+                )
+                destination_wh = (
+                    self.session.query(Warehouse)
+                    .filter_by(id=destination_warehouse_id, organisation_id=org_id, is_active=True)
+                    .first()
+                )
+                if not source_wh:
+                    raise ValidationError("Source warehouse not found for this organisation")
+                if not destination_wh:
+                    raise ValidationError("Receiving warehouse not found for this organisation")
+                if warehouse_id == destination_warehouse_id:
+                    raise ValidationError("Source and receiving warehouse must be different")
+                
+                # Decrease from source warehouse
+                stock_service.decrease_stock(
+                    item_id=item.id,
+                    org_id=org_id,
+                    quantity=quantity,
+                    warehouse_id=warehouse_id,
+                    reference=reference or "TRANSFER_OUT",
+                    notes=notes or f"Transfer to warehouse {destination_warehouse_id}",
+                    destination_warehouse_id=destination_warehouse_id,
+                    commit=False,
+                )
+                
+                # Increase to destination warehouse
+                stock_service.increase_stock(
+                    item_id=item.id,
+                    org_id=org_id,
+                    quantity=quantity,
+                    warehouse_id=destination_warehouse_id,
+                    reference=reference or "TRANSFER_IN",
+                    notes=notes or f"Transfer from warehouse {warehouse_id}",
+                    commit=False,
+                )
+                
+                action = "STOCK_TRANSFERRED"
+                qty_change = 0  # Net change is zero for transfers
+                
+            elif movement_type == "IN":
+                stock_service.increase_stock(
+                    item_id=item.id,
+                    org_id=org_id,
+                    quantity=quantity,
+                    warehouse_id=warehouse_id,
+                    reference=reference,
+                    notes=notes,
+                    commit=False,
+                )
                 action = "STOCK_INCREASED"
                 qty_change = quantity
+
             elif movement_type == "OUT":
-                item.remove_stock(quantity, warehouse_id=warehouse_id, reference=reference, notes=notes)
+                stock_service.decrease_stock(
+                    item_id=item.id,
+                    org_id=org_id,
+                    quantity=quantity,
+                    warehouse_id=warehouse_id,
+                    reference=reference,
+                    notes=notes,
+                    commit=False,
+                )
                 action = "STOCK_DECREASED"
                 qty_change = -quantity
+
             else:
                 raise ValidationError("Invalid movement type")
 
@@ -261,13 +427,22 @@ class InventoryService:
                 session=self.session,
             )
 
-            # Note: RestockService.evaluate_stock_health is now triggered automatically
-            # inside item.add_stock / remove_stock to prevent logic bypass.
-
             self.session.commit()
-            
-            event_bus.publish("STOCK_UPDATE", {"item_id": item.id, "movement_type": movement_type, "quantity": qty_change}, organisation_id=org_id)
-            
+            self.session.refresh(item)
+            item.quantity = StockService(session=self.session).get_current_quantity(item.id)
+            self.session.refresh(item)
+
+            from app.services.restock_service import RestockService
+            RestockService.evaluate_stock_health(item.id)
+
+            event_bus.publish(
+                "STOCK_UPDATE",
+                {"item_id": item.id, "movement_type": movement_type, "quantity": qty_change},
+                organisation_id=org_id,
+            )
+            from app.services.report_analytics_service import ReportAnalyticsService
+            ReportAnalyticsService.invalidate_cache(org_id)
+
             return item
         except Exception as e:
             current_app.logger.exception(e)
@@ -283,6 +458,7 @@ class InventoryService:
         org_id,
         movements,
         user_id=None,
+        module=None,
     ):
         """
         Batch stock update used during GRN approval.
@@ -308,13 +484,38 @@ class InventoryService:
                 )
 
             qty = int(movement["quantity"])
+            movement_type = movement.get("type", "IN")
 
-            item.add_stock(
-                qty,
-                warehouse_id=movement.get("warehouse_id"),
-                reference=movement.get("reference"),
-                notes=movement.get("notes"),
-            )
+            if movement_type == "IN":
+                StockService(session=self.session).increase_stock(
+                    item_id=item.id,
+                    org_id=org_id,
+                    quantity=qty,
+                    warehouse_id=movement.get("warehouse_id"),
+                    reference=movement.get("reference"),
+                    notes=movement.get("notes"),
+                    commit=False,
+                )
+                audit_action = "STOCK_INCREASED"
+                qty_change = qty
+            elif movement_type == "OUT":
+                try:
+                    StockService(session=self.session).decrease_stock(
+                        item_id=item.id,
+                        org_id=org_id,
+                        quantity=qty,
+                        warehouse_id=movement.get("warehouse_id"),
+                        reference=movement.get("reference"),
+                        notes=movement.get("notes"),
+                        commit=False,
+                    )
+                except ValidationError as e:
+                    # Surface as a ConflictError for callers expecting conflict semantics
+                    raise ConflictError(str(e))
+                audit_action = "STOCK_DECREASED"
+                qty_change = -qty
+            else:
+                raise ValidationError("Invalid movement type")
 
             if movement.get("unit_cost") is not None:
                 item.last_purchase_cost = movement["unit_cost"]
@@ -324,9 +525,10 @@ class InventoryService:
 
             AuditService.log_inventory_change(
                 item,
-                "STOCK_INCREASED",
-                quantity_change=qty,
+                audit_action,
+                quantity_change=qty_change,
                 reference=movement.get("reference"),
+                module=module,
                 session=self.session,
             )
 
@@ -351,8 +553,15 @@ class InventoryService:
         if not item:
             raise NotFoundError("Inventory item not found")
 
-        if item.quantity > 0:
-            raise ConflictError("Cannot delete item with remaining stock")
+        # Use StockService to compute the authoritative current quantity
+        try:
+            current_qty = StockService(session=self.session).get_current_quantity(item.id)
+        except Exception:
+            # Fallback to the quantity on the item row if StockService is unavailable
+            current_qty = getattr(item, 'quantity', 0) or 0
+
+        if current_qty > 0:
+            raise ConflictError(f"Cannot delete item with remaining stock ({current_qty} units).")
 
         self.repo.soft_delete_item(item)
         AuditService.log_inventory_change(
@@ -365,6 +574,57 @@ class InventoryService:
         
         event_bus.publish("INVENTORY_DELETED", {"item_id": item_id}, organisation_id=org_id)
         
+        return item
+
+    @transaction_retry(max_retries=3)
+    def force_delete_item(self, item_id, org_id):
+        item = self.repo.get_item(item_id, org_id)
+        if not item:
+            raise NotFoundError("Inventory item not found")
+
+        current_qty = 0
+        warehouse_rows = self.session.query(WarehouseStock).filter_by(item_id=item.id).all()
+        try:
+            current_qty = StockService(session=self.session).get_current_quantity(item.id)
+        except Exception:
+            current_qty = getattr(item, 'quantity', 0) or 0
+
+        if current_qty > 0:
+            warehouse_rows_cleared = []
+            for wh_stock in warehouse_rows:
+                previous_quantity = wh_stock.quantity_on_hand
+                previous_reserved = wh_stock.quantity_reserved
+                if previous_quantity != 0 or previous_reserved != 0:
+                    warehouse_rows_cleared.append(
+                        {
+                            "warehouse_id": wh_stock.warehouse_id,
+                            "previous_quantity": previous_quantity,
+                            "previous_reserved": previous_reserved,
+                        }
+                    )
+                    wh_stock.quantity_on_hand = 0
+                    wh_stock.quantity_reserved = 0
+
+            # Preserve an audit trail for the forced deletion and the stock zeroing.
+            AuditService.log_action(
+                action="INVENTORY_ITEM_FORCE_DELETED",
+                entity_type="inventory_item",
+                entity_id=item.id,
+                details={
+                    "previous_quantity": current_qty,
+                    "new_quantity": 0,
+                    "reference": "Force delete with remaining stock",
+                    "warehouse_rows_cleared": warehouse_rows_cleared,
+                },
+                organisation_id=org_id,
+                session=self.session,
+            )
+
+        self.repo.soft_delete_item(item)
+        item.quantity = 0
+
+        self.session.commit()
+        event_bus.publish("INVENTORY_FORCE_DELETED", {"item_id": item.id, "previous_quantity": current_qty}, organisation_id=org_id)
         return item
 
     def low_stock_items(self, org_id):
