@@ -14,7 +14,9 @@ from app import db
 from app.models import InventoryItem, StockMovement
 from app.models.asset import Asset
 from app.models.organization import Organization
+from app.models.stock_levels import WarehouseStock
 from app.services.analytics_service import AnalyticsService
+from app.services.stock_service import StockService
 
 # Simple in-process cache: key -> (expires_at, payload)
 _CACHE: dict[str, tuple[float, Any]] = {}
@@ -58,6 +60,13 @@ def _cache_set(key: str, payload: Any) -> None:
     _CACHE[key] = (time.time() + _CACHE_TTL_SECONDS, payload)
 
 
+def _cache_invalidate_org(org_id: int) -> None:
+    prefix = f"{org_id}:"
+    keys = [key for key in _CACHE if key.startswith(prefix)]
+    for key in keys:
+        _CACHE.pop(key, None)
+
+
 def _org_currency(org_id: int) -> str:
     org = Organization.query.get(org_id)
     if org and org.preferences:
@@ -84,6 +93,10 @@ def _department_asset_filter(query, department_name: str | None):
 
 class ReportAnalyticsService:
     """SQL-backed report payloads for JSON analytics APIs."""
+
+    @staticmethod
+    def invalidate_cache(org_id: int) -> None:
+        _cache_invalidate_org(org_id)
 
     @staticmethod
     def get_assets_report(
@@ -248,9 +261,10 @@ class ReportAnalyticsService:
         return payload
 
     @staticmethod
-    def get_inventory_report(org_id: int, days: int = 30) -> dict:
+    def get_inventory_report(org_id: int, days: int = 30, department_id: int | None = None) -> dict:
         days = _parse_days(days)
-        key = _cache_key(org_id, "inventory", days, "org")
+        scope = f"dept:{department_id}" if department_id else "org"
+        key = _cache_key(org_id, "inventory", days, scope)
         cached = _cache_get(key)
         if cached:
             return cached
@@ -259,21 +273,47 @@ class ReportAnalyticsService:
             organisation_id=org_id, is_active=True
         )
 
+        # If department scoped, attempt to resolve department warehouse scope
+        dept_warehouse_id = None
+        if department_id:
+            from app.models.organization import Department
+            dept = Department.query.filter_by(id=department_id, organisation_id=org_id, is_active=True).first()
+            if dept and dept.warehouse_id:
+                dept_warehouse_id = dept.warehouse_id
+
         total_skus = inv_base.count()
-        total_units = (
-            db.session.query(func.sum(InventoryItem.quantity))
-            .filter_by(organisation_id=org_id, is_active=True)
-            .scalar()
-            or 0
+
+        stock_query = (
+            db.session.query(
+                WarehouseStock.item_id,
+                func.sum(WarehouseStock.quantity_on_hand).label("total_qty"),
+            )
+            .join(InventoryItem, WarehouseStock.item_id == InventoryItem.id)
+            .filter(
+                InventoryItem.organisation_id == org_id,
+                InventoryItem.is_active == True,
+            )
         )
+        if dept_warehouse_id:
+            stock_query = stock_query.filter(WarehouseStock.warehouse_id == dept_warehouse_id)
+
+        current_stock = {row.item_id: int(row.total_qty or 0) for row in stock_query.group_by(WarehouseStock.item_id).all()}
 
         items = inv_base.all()
+        stock_service = StockService(session=db.session)
+        item_quantities = {}
+        total_units = 0
+        for item in items:
+            qty = current_stock.get(item.id, stock_service.get_current_quantity(item.id))
+            item_quantities[item.id] = qty
+            total_units += qty
+
         low_stock_items = []
         overstock_items = []
         for item in items:
-            qty = int(item.quantity or 0)
+            qty = item_quantities[item.id]
             reorder = int(item.reorder_level or 0)
-            if item.is_low_stock():
+            if qty < reorder:
                 low_stock_items.append(
                     {
                         "id": item.id,
@@ -295,31 +335,32 @@ class ReportAnalyticsService:
                     }
                 )
 
-        top_stock = (
-            db.session.query(
-                InventoryItem.id,
-                InventoryItem.sku,
-                InventoryItem.name,
-                InventoryItem.quantity,
-                InventoryItem.unit,
-            )
-            .filter_by(organisation_id=org_id, is_active=True)
-            .order_by(InventoryItem.quantity.desc())
-            .limit(12)
-            .all()
-        )
+        top_stock_rows = sorted(
+            [
+                {
+                    "id": item.id,
+                    "sku": item.sku,
+                    "name": item.name,
+                    "unit": item.unit,
+                    "quantity": item_quantities[item.id],
+                }
+                for item in items
+            ],
+            key=lambda row: row["quantity"],
+            reverse=True,
+        )[:12]
         stock_levels_chart = [
             {
-                "sku": row.sku or f"ID-{row.id}",
-                "name": row.name[:24],
-                "quantity": int(row.quantity or 0),
-                "unit": row.unit or "unit",
+                "sku": row["sku"] or f"ID-{row['id']}",
+                "name": row["name"][:24],
+                "quantity": int(row["quantity"] or 0),
+                "unit": row["unit"] or "unit",
             }
-            for row in top_stock
+            for row in top_stock_rows
         ]
 
         threshold = datetime.utcnow() - timedelta(days=days)
-        movement_rows = (
+        movement_query = (
             db.session.query(
                 func.date(StockMovement.date).label("day"),
                 StockMovement.type,
@@ -330,9 +371,48 @@ class ReportAnalyticsService:
                 InventoryItem.organisation_id == org_id,
                 StockMovement.date >= threshold,
             )
-            .group_by("day", StockMovement.type)
-            .all()
         )
+        if dept_warehouse_id:
+            movement_query = movement_query.filter(
+                (StockMovement.warehouse_id == dept_warehouse_id) | (StockMovement.destination_warehouse_id == dept_warehouse_id)
+            )
+
+        movement_rows = movement_query.group_by("day", StockMovement.type).all()
+
+        # Augment movement data with item issues/returns for department-specific view
+        if department_id:
+            # OUT movements: ItemIssue -> issued to department
+            from app.models.organization import ItemIssue, ItemReturn
+            issues = (
+                db.session.query(
+                    func.date(ItemIssue.issued_date).label('day'),
+                    func.sum(ItemIssue.quantity).label('qty')
+                )
+                .filter(
+                    ItemIssue.organisation_id == org_id,
+                    ItemIssue.to_department_id == department_id,
+                    ItemIssue.issued_date >= threshold,
+                )
+                .group_by('day')
+                .all()
+            )
+            # IN movements: ItemReturn -> returned from department
+            returns = (
+                db.session.query(
+                    func.date(ItemReturn.return_date).label('day'),
+                    func.sum(ItemReturn.quantity).label('qty')
+                )
+                .filter(
+                    ItemReturn.organisation_id == org_id,
+                    ItemReturn.from_department_id == department_id,
+                    ItemReturn.return_date >= threshold,
+                )
+                .group_by('day')
+                .all()
+            )
+        else:
+            issues = []
+            returns = []
 
         movement_by_day: dict[str, dict[str, int]] = {}
         for day, m_type, qty in movement_rows:
@@ -340,6 +420,18 @@ class ReportAnalyticsService:
             if d not in movement_by_day:
                 movement_by_day[d] = {"IN": 0, "OUT": 0}
             movement_by_day[d][m_type] = int(qty or 0)
+
+        # add issues/returns for department-scoped movements
+        for day, qty in issues:
+            d = str(day)
+            if d not in movement_by_day:
+                movement_by_day[d] = {"IN": 0, "OUT": 0}
+            movement_by_day[d]["OUT"] += int(qty or 0)
+        for day, qty in returns:
+            d = str(day)
+            if d not in movement_by_day:
+                movement_by_day[d] = {"IN": 0, "OUT": 0}
+            movement_by_day[d]["IN"] += int(qty or 0)
 
         movement_series = []
         for i in range(days):
@@ -412,9 +504,10 @@ class ReportAnalyticsService:
         return payload
 
     @staticmethod
-    def get_tracking_report(org_id: int, days: int = 30) -> dict:
+    def get_tracking_report(org_id: int, days: int = 30, department_id: int | None = None) -> dict:
         days = _parse_days(days)
-        key = _cache_key(org_id, "tracking", days, "org")
+        scope = f"dept:{department_id}" if department_id else "org"
+        key = _cache_key(org_id, "tracking", days, scope)
         cached = _cache_get(key)
         if cached:
             return cached
@@ -424,25 +517,32 @@ class ReportAnalyticsService:
         from app.models.inventory import AuditLog
         from app.models.user import User
 
+        # If department scoped, try to limit by department warehouse
+        dept_warehouse_id = None
+        if department_id:
+            from app.models.organization import Department
+            dept = Department.query.filter_by(id=department_id, organisation_id=org_id, is_active=True).first()
+            if dept and dept.warehouse_id:
+                dept_warehouse_id = dept.warehouse_id
+
+        scan_filter = [ScanEvent.organisation_id == org_id, ScanEvent.timestamp >= threshold]
+        if dept_warehouse_id:
+            scan_filter.append(ScanEvent.warehouse_id == dept_warehouse_id)
+
         total_scans = (
-            ScanEvent.query.filter(
-                ScanEvent.organisation_id == org_id,
-                ScanEvent.timestamp >= threshold,
-            ).count()
+            ScanEvent.query.filter(*scan_filter).count()
         )
 
-        scans_by_day_rows = (
+        scans_query = (
             db.session.query(
                 func.date(ScanEvent.timestamp).label("day"),
                 func.count(ScanEvent.id),
             )
-            .filter(
-                ScanEvent.organisation_id == org_id,
-                ScanEvent.timestamp >= threshold,
-            )
-            .group_by("day")
-            .all()
+            .filter(ScanEvent.organisation_id == org_id, ScanEvent.timestamp >= threshold)
         )
+        if dept_warehouse_id:
+            scans_query = scans_query.filter(ScanEvent.warehouse_id == dept_warehouse_id)
+        scans_by_day_rows = scans_query.group_by("day").all()
         scans_map = {str(day): cnt for day, cnt in scans_by_day_rows}
         activity_frequency = []
         for i in range(days):
@@ -544,8 +644,16 @@ class ReportAnalyticsService:
         assets = ReportAnalyticsService.get_assets_report(
             org_id, days, department_name
         )
-        inventory = ReportAnalyticsService.get_inventory_report(org_id, days)
-        tracking = ReportAnalyticsService.get_tracking_report(org_id, days)
+        # if department_name provided, attempt to resolve department id for inventory/tracking scoping
+        dept_id = None
+        if department_name:
+            from app.models.organization import Department
+            dept = Department.query.filter_by(name=department_name, organisation_id=org_id, is_active=True).first()
+            if dept:
+                dept_id = dept.id
+
+        inventory = ReportAnalyticsService.get_inventory_report(org_id, days, department_id=dept_id)
+        tracking = ReportAnalyticsService.get_tracking_report(org_id, days, department_id=dept_id)
 
         asset_summary = AnalyticsService.get_asset_summary(org_id)
         inv_summary = AnalyticsService.get_inventory_summary(org_id)
