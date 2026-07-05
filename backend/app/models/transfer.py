@@ -32,7 +32,7 @@ class TransferRequest(db.Model):
         db.Integer, db.ForeignKey("users.id"), nullable=False
     )
     from_department_id = db.Column(
-        db.Integer, db.ForeignKey("departments.id"), nullable=False
+        db.Integer, db.ForeignKey("departments.id"), nullable=True
     )
     to_department_id = db.Column(
         db.Integer, db.ForeignKey("departments.id"), nullable=False
