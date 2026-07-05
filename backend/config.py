@@ -47,6 +47,53 @@ def _postgres_engine_options(db_url: Optional[str]) -> dict:
     return options
 
 
+def _get_production_jwt_secret() -> str:
+    """Get and validate JWT secret for production (minimum 32 chars for HS256).
+    
+    Raises:
+        ValueError: If JWT_SECRET_KEY is not set or too short.
+    """
+    secret = os.environ.get("JWT_SECRET_KEY")
+    if not secret:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable is required and must be set. "
+            "Generate a strong secret: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    if len(secret) < 32:
+        raise ValueError(
+            f"JWT_SECRET_KEY must be at least 32 characters (HS256 minimum). "
+            f"Current length: {len(secret)}. "
+            f"Generate a strong secret: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    return secret
+
+
+def _validate_jwt_secret(secret: Optional[str]) -> str:
+    """Validate JWT secret meets minimum length for HS256 (32 bytes).
+    
+    Args:
+        secret: The JWT secret from environment or config.
+    
+    Returns:
+        The validated secret.
+    
+    Raises:
+        ValueError: If secret is missing or too short in production.
+    """
+    if not secret:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable is required and must be set. "
+            "Generate a strong secret: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    if len(secret) < 32:
+        raise ValueError(
+            f"JWT_SECRET_KEY must be at least 32 characters (HS256 minimum). "
+            f"Current length: {len(secret)}. "
+            f"Generate a strong secret: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    return secret
+
+
 class Config:
     """Base configuration"""
 
@@ -100,6 +147,8 @@ class DevelopmentConfig(Config):
     """Development configuration"""
 
     DEBUG = True
+    SECRET_KEY = os.environ.get("SECRET_KEY") or "dev-secret-key"
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "dev-secret-key"
     SQLALCHEMY_ECHO = True
     SQLALCHEMY_DATABASE_URI = (
         os.environ.get("DATABASE_URL") or "sqlite:///trackit_dev.db"
@@ -123,12 +172,15 @@ class ProductionConfig(Config):
 
     DEBUG = False
     
+    # Enforce strong JWT secret in production (minimum 32 characters for HS256)
+    # Note: Actual validation happens in create_app() to avoid import-time errors in tests
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    
     # Disable CSRF checks for cookie-based JWT in cross-site environments.
     # This prevents 401 on safe session checks like GET /api/auth/me when
     # the frontend cannot reliably emit X-CSRF-TOKEN.
     JWT_COOKIE_CSRF_PROTECT = False
-    
-
     
     _db_url = os.environ.get("DATABASE_URL_PROD") or os.environ.get("DATABASE_URL")
     _db_url = normalize_supabase_database_url(_db_url)
@@ -161,8 +213,9 @@ class TestingConfig(Config):
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     WTF_CSRF_ENABLED = False
     JWT_TOKEN_LOCATION = ["headers", "cookies"]
-    SECRET_KEY = "test-secret-key"
-    JWT_SECRET_KEY = "test-jwt-secret-key"
+    SECRET_KEY = os.environ.get("SECRET_KEY") or "test-secret-key"
+    # Use a longer default test JWT secret to avoid InsecureKeyLengthWarning during tests
+    JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY") or "test-jwt-secret-key-please-change-to-32-chars!"
 
 
 config_by_name = {
