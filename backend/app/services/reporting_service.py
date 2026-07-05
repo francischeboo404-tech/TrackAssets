@@ -1,7 +1,13 @@
 from datetime import datetime
 
+from sqlalchemy import func
+
+from app import db
 from app.models.asset import Asset
+from app.models.inventory import InventoryItem
 from app.models.organization import Organization
+from app.models.stock_levels import WarehouseStock
+from app.services.stock_service import StockService
 from app.utils.formatted_export import format_currency, format_status_label
 from app.utils.reporting_engines import ProfessionalExcelReport, ProfessionalPDFReport
 
@@ -94,6 +100,19 @@ class ReportingService:
 
         items = query.order_by(InventoryItem.sku.asc()).all()
 
+        stock_map = {
+            row.item_id: int(row.quantity_on_hand or 0)
+            for row in (
+                db.session.query(
+                    WarehouseStock.item_id,
+                    func.sum(WarehouseStock.quantity_on_hand).label("quantity_on_hand"),
+                )
+                .filter(WarehouseStock.item_id.in_([item.id for item in items]))
+                .group_by(WarehouseStock.item_id)
+                .all()
+            )
+        }
+
         headers = [
             "SKU",
             "Item Name",
@@ -107,18 +126,19 @@ class ReportingService:
         data = []
         total = 0.0
         for item in items:
-            line = float(item.quantity or 0) * float(item.unit_price or 0)
+            qty = stock_map[item.id] if item.id in stock_map else StockService(session=db.session).get_current_quantity(item.id)
+            line = float(qty) * float(item.unit_price or 0)
             total += line
             data.append(
                 [
                     item.sku or "",
                     item.name,
-                    item.quantity,
+                    qty,
                     item.unit or "unit",
                     format_currency(item.unit_price, currency),
                     format_currency(line, currency),
                     item.reorder_level,
-                    "Low Stock" if item.is_low_stock() else "In Stock",
+                    "Low Stock" if qty < int(item.reorder_level or 0) else "In Stock",
                 ]
             )
 
@@ -348,6 +368,21 @@ class ReportingService:
         if date_to:
             iq = iq.filter(InventoryItem.created_at <= date_to)
         items = iq.order_by(InventoryItem.sku.asc()).all()
+
+        item_ids = [item.id for item in items]
+        stock_map = {
+            row.item_id: int(row.quantity_on_hand or 0)
+            for row in (
+                db.session.query(
+                    WarehouseStock.item_id,
+                    func.sum(WarehouseStock.quantity_on_hand).label("quantity_on_hand"),
+                )
+                .filter(WarehouseStock.item_id.in_(item_ids))
+                .group_by(WarehouseStock.item_id)
+                .all()
+            )
+        }
+
         inv_headers = [
             "SKU",
             "Item Name",
@@ -360,17 +395,18 @@ class ReportingService:
         ]
         inv_rows = []
         for item in items:
-            line = float(item.quantity or 0) * float(item.unit_price or 0)
+            qty = stock_map[item.id] if item.id in stock_map else StockService(session=db.session).get_current_quantity(item.id)
+            line = float(qty) * float(item.unit_price or 0)
             inv_rows.append(
                 [
                     item.sku or "",
                     item.name,
-                    item.quantity,
+                    qty,
                     item.unit or "unit",
                     format_currency(item.unit_price, currency),
                     format_currency(line, currency),
                     item.reorder_level,
-                    "Low Stock" if item.is_low_stock() else "In Stock",
+                    "Low Stock" if qty < int(item.reorder_level or 0) else "In Stock",
                 ]
             )
 
