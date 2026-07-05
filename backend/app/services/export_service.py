@@ -1,7 +1,11 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy import func
+
 from app.models import InventoryItem, StockMovement
 from app.models.organization import Organization
+from app.models.stock_levels import WarehouseStock
+from app.services.stock_service import StockService
 from app.utils.formatted_export import build_csv_document, format_status_label
 
 
@@ -93,15 +97,31 @@ class ExportService:
         ]
         rows = []
         grand_total = 0.0
+
+        item_ids = [item.id for item in items]
+        stock_map = {
+            row.item_id: int(row.quantity_on_hand or 0)
+            for row in (
+                db.session.query(
+                    WarehouseStock.item_id,
+                    func.sum(WarehouseStock.quantity_on_hand).label("quantity_on_hand"),
+                )
+                .filter(WarehouseStock.item_id.in_(item_ids))
+                .group_by(WarehouseStock.item_id)
+                .all()
+            )
+        }
+
         for item in items:
-            total = float(item.quantity or 0) * float(item.unit_price or 0)
+            qty = stock_map.get(item.id, StockService(session=db.session).get_current_quantity(item.id))
+            total = float(qty) * float(item.unit_price or 0)
             grand_total += total
-            health = "Low Stock" if item.is_low_stock() else "OK"
+            health = "Low Stock" if qty < int(item.reorder_level or 0) else "OK"
             rows.append(
                 [
                     item.name,
                     item.sku or "",
-                    item.quantity,
+                    qty,
                     item.unit or "unit",
                     f"{currency} {float(item.unit_price or 0):,.2f}",
                     f"{currency} {total:,.2f}",
