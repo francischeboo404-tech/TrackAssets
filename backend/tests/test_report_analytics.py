@@ -111,6 +111,12 @@ class TestReportAnalytics(unittest.TestCase):
         self.assertTrue(len(data["movement_over_time"]) >= 1)
         self.assertTrue(len(data["most_consumed"]) >= 0)
 
+    def test_inventory_report_uses_legacy_item_quantity_when_no_warehouse_stock(self):
+        data = ReportAnalyticsService.get_inventory_report(1, days=30)
+        self.assertEqual(data["total_units"], 5)
+        self.assertEqual(data["total_valuation"], 50)
+        self.assertTrue(any(item["quantity"] == 5 for item in data["stock_levels_chart"]))
+
     def test_tracking_report_aggregates(self):
         data = ReportAnalyticsService.get_tracking_report(1, days=30)
         self.assertGreaterEqual(data["total_scans"], 1)
