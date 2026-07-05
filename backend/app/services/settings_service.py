@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from flask import current_app
 from werkzeug.utils import secure_filename
 
@@ -10,11 +11,13 @@ from app import db
 from app.errors import NotFoundError, ValidationError
 from app.models.asset import Asset
 from app.models.inventory import InventoryItem, StockMovement
+from app.services.stock_service import StockService
 from app.utils.formatted_export import (
     build_csv_multi_section,
     format_currency,
     format_status_label,
 )
+from app.models.stock_levels import WarehouseStock
 
 ALLOWED_LOGO_EXTENSIONS = {"png", "jpg", "jpeg", "svg"}
 MAX_LOGO_BYTES = 2 * 1024 * 1024  # 2MB
@@ -169,21 +172,35 @@ class SettingsService:
             .order_by(InventoryItem.sku.asc())
             .all()
         )
+        item_ids = [item.id for item in inventory]
+        stock_map = {
+            row.item_id: int(row.quantity_on_hand or 0)
+            for row in (
+                db.session.query(
+                    WarehouseStock.item_id,
+                    func.sum(WarehouseStock.quantity_on_hand).label("quantity_on_hand"),
+                )
+                .filter(WarehouseStock.item_id.in_(item_ids))
+                .group_by(WarehouseStock.item_id)
+                .all()
+            )
+        }
         inv_rows = []
         inv_value_total = 0.0
         for item in inventory:
-            line_val = float(item.quantity or 0) * float(item.unit_price or 0)
+            qty = stock_map[item.id] if item.id in stock_map else StockService(session=db.session).get_current_quantity(item.id)
+            line_val = float(qty) * float(item.unit_price or 0)
             inv_value_total += line_val
             inv_rows.append(
                 [
                     item.sku or "",
                     item.name,
-                    item.quantity,
+                    qty,
                     item.unit or "unit",
                     format_currency(item.unit_price, currency),
                     format_currency(line_val, currency),
                     item.reorder_level,
-                    "Low Stock" if item.is_low_stock() else "OK",
+                    "Low Stock" if qty < int(item.reorder_level or 0) else "OK",
                 ]
             )
 
