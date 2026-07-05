@@ -93,6 +93,7 @@ class ReceivingService:
             details={"grn_number": grn.grn_number, "po_id": po_id, "total_quantity": total_qty},
             user_id=received_by_id,
             organisation_id=org_id,
+            module="receiving",
             session=db.session,
         )
 
@@ -130,6 +131,7 @@ class ReceivingService:
             details={"grn_id": grn_id, "status": status},
             user_id=inspector_id,
             organisation_id=org_id,
+            module="receiving",
             session=db.session,
         )
         return iar
@@ -185,12 +187,34 @@ class ReceivingService:
             total_accepted += accepted
 
             if accepted > 0:
+                # Determine warehouse for stock movement
+                warehouse_id = None
+                if grn_item.bin_location_id:
+                    # Get warehouse from bin
+                    from app.models.location_topology import WarehouseBin, WarehouseShelf, WarehouseRack, WarehouseZone
+                    bin_obj = db.session.get(WarehouseBin, grn_item.bin_location_id)
+                    if bin_obj:
+                        # Navigate up the hierarchy to find warehouse
+                        shelf = db.session.get(WarehouseShelf, bin_obj.shelf_id) if bin_obj.shelf_id else None
+                        if shelf:
+                            rack = db.session.get(WarehouseRack, shelf.rack_id) if shelf.rack_id else None
+                            if rack:
+                                zone = db.session.get(WarehouseZone, rack.zone_id) if rack.zone_id else None
+                                if zone:
+                                    warehouse_id = zone.warehouse_id
+                else:
+                    # No bin specified; find warehouse with existing stock for this item
+                    from app.models.stock_levels import WarehouseStock
+                    ws = db.session.query(WarehouseStock).filter_by(item_id=grn_item.item_id).first()
+                    if ws:
+                        warehouse_id = ws.warehouse_id
+                
                 movements.append(
                     {
                         "item_id": grn_item.item_id,
                         "type": "IN",
                         "quantity": int(accepted),
-                        "warehouse_id": grn_item.bin_location_id,
+                        "warehouse_id": warehouse_id,
                         "reference": grn.grn_number,
                         "notes": "Approved per-item",
                         "unit_cost": float(grn_item.unit_cost) if grn_item.unit_cost else None,
@@ -228,7 +252,7 @@ class ReceivingService:
 
         # Apply movements (if any) using InventoryService which will commit the session
         if movements:
-            InventoryService(session=db.session).update_stock_batch(grn.organization_id, movements, user_id=inspector_id)
+            InventoryService(session=db.session).update_stock_batch(grn.organization_id, movements, user_id=inspector_id, module="receiving")
         else:
             db.session.commit()
 
@@ -239,6 +263,7 @@ class ReceivingService:
             details={"grn_id": grn_id, "total_received": total_received, "total_accepted": total_accepted},
             user_id=inspector_id,
             organisation_id=org_id,
+            module="receiving",
             session=db.session,
         )
 
@@ -275,7 +300,7 @@ class ReceivingService:
             )
 
         # Apply all GRN items as a single atomic batch
-        InventoryService(session=db.session).update_stock_batch(grn.organization_id, movements, user_id=grn.received_by_id)
+        InventoryService(session=db.session).update_stock_batch(grn.organization_id, movements, user_id=grn.received_by_id, module="receiving")
 
         # Reconcile PO status: check if all PO items fully received
         po = db.session.get(PurchaseOrder, grn.po_id)
@@ -302,9 +327,12 @@ class ReceivingService:
             details={"grn_number": grn.grn_number, "po_id": grn.po_id},
             user_id=None,
             organisation_id=grn.organization_id,
+            module="receiving",
             session=db.session,
         )
         db.session.commit()
+        from app.services.report_analytics_service import ReportAnalyticsService
+        ReportAnalyticsService.invalidate_cache(grn.organization_id)
 
         return grn
 
@@ -323,6 +351,7 @@ class ReceivingService:
             details={"grn_number": grn.grn_number},
             user_id=None,
             organisation_id=grn.organization_id,
+            module="receiving",
             session=db.session,
         )
         return grn
