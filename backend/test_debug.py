@@ -1,3 +1,6 @@
+import pytest
+pytest.skip("Debug script - skip during pytest", allow_module_level=True)
+
 import requests
 
 BASE_URL = "http://127.0.0.1:5000/api"
