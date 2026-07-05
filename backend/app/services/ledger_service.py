@@ -14,7 +14,7 @@ class LedgerService:
         if not item:
             raise ValueError("Item not found")
             
-        system_quantity = item.quantity
+        system_quantity = StockService(session=db.session).get_current_quantity(item.id)
         variance = physical_quantity - system_quantity
         
         year = datetime.now(timezone.utc).year
@@ -46,7 +46,8 @@ class LedgerService:
         # Update system stock to match physical stock
         item = db.session.query(InventoryItem).with_for_update().filter_by(id=var_rep.item_id).first()
         if item:
-            variance = var_rep.physical_quantity - item.quantity
+            current_quantity = StockService(session=db.session).get_current_quantity(item.id)
+            variance = var_rep.physical_quantity - current_quantity
             stock_service = StockService(session=db.session)
             if variance != 0:
                 movements = []
