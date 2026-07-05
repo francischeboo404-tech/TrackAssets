@@ -2,6 +2,7 @@ from app import db
 from app.models.kenya_gov_models import DisposalRequest, DisposalItem
 from app.models.inventory import InventoryItem
 from app.services.inventory_service import InventoryService
+from app.services.stock_service import StockService
 from app.db_utils import transaction_retry
 from datetime import datetime, timezone
 
@@ -90,7 +91,8 @@ class DisposalService:
             if not item:
                 raise ValueError(f"Item {d_item.item_id} not found")
 
-            if int(item.quantity or 0) < int(d_item.quantity or 0):
+            current_qty = StockService(session=db.session).get_current_quantity(item.id)
+            if int(current_qty or 0) < int(d_item.quantity or 0):
                 raise ValueError(f"Insufficient stock to dispose for {item.name}")
 
             movements.append(
