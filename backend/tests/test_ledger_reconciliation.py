@@ -3,8 +3,10 @@ from datetime import datetime
 from app import create_app, db
 from app.models import StockCard, SuppliesLedgerCard
 from app.models.inventory import InventoryItem
-from app.models.organization import Organization
 from app.models.kenya_gov_models import VarianceReport
+from app.models.location_topology import Warehouse
+from app.models.stock_levels import WarehouseStock
+from app.models.organization import Organization
 from app.services.ledger_service import LedgerService
 from app.services.inventory_service import InventoryService
 
@@ -29,15 +31,34 @@ class TestLedgerReconciliation(unittest.TestCase):
         db.session.add(user)
         db.session.commit()
 
-        # Inventory item used for reconciliation
+        # Inventory item used for reconciliation. The item quantity is intentionally stale
+        # relative to warehouse stock so variance resolution must reconcile from warehouse totals.
         self.item = InventoryItem(
             organisation_id=self.org_id,
             name="Recon Item",
             sku="RECON-001",
-            quantity=100,
+            quantity=150,
             unit_price=5.0,
         )
         db.session.add(self.item)
+        db.session.commit()
+
+        self.warehouse = Warehouse(
+            organisation_id=self.org_id,
+            name="MAIN WAREHOUSE",
+            code="MAIN",
+            is_active=True,
+        )
+        db.session.add(self.warehouse)
+        db.session.commit()
+
+        self.warehouse_stock = WarehouseStock(
+            item_id=self.item.id,
+            warehouse_id=self.warehouse.id,
+            quantity_on_hand=100,
+            quantity_reserved=0,
+        )
+        db.session.add(self.warehouse_stock)
         db.session.commit()
 
     def tearDown(self):
