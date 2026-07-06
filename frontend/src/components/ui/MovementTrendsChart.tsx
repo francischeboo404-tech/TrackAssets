@@ -34,7 +34,7 @@ export const MovementTrendsChart: React.FC<MovementTrendsChartProps> = ({ data, 
     }));
 
   return (
-    <div className="w-full h-[350px]">
+    <div className="w-full h-[350px] min-w-0" style={{ minWidth: 0 }}>
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart
           data={chartData}
