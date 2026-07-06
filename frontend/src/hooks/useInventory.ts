@@ -15,13 +15,14 @@ export const useInventory = (params: any = {}) => {
 export const useUpdateStock = () => {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, quantity, type, reference, notes, warehouse_id }: {
+    mutationFn: async ({ id, quantity, type, reference, notes, warehouse_id, destination_warehouse_id }: {
       id: number;
       quantity: number;
       type: 'IN' | 'OUT';
       reference: string;
       notes?: string;
       warehouse_id?: number;
+      destination_warehouse_id?: number;
     }) => {
       const response = await api.post(`/inventory/${id}/stock`, {
         quantity,
@@ -29,15 +30,43 @@ export const useUpdateStock = () => {
         reference,
         notes,
         warehouse_id,
+        destination_warehouse_id,
       });
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['item-warehouse-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', { search: undefined, page: 1 }] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', { search: undefined }] });
+      queryClient.invalidateQueries({ queryKey: ['inventory', variables.id] });
     },
   });
 };
+
+export interface WarehouseStockLevel {
+  warehouse_id: number;
+  warehouse_name: string;
+  warehouse_code: string;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+}
+
+/** Returns per-warehouse stock breakdown for a single inventory item. */
+export const useItemWarehouseStock = (itemId: number | undefined) => {
+  return useQuery({
+    queryKey: ['item-warehouse-stock', itemId],
+    queryFn: async () => {
+      const response = await api.get<WarehouseStockLevel[]>(`/inventory/${itemId}/warehouse-stock`);
+      return response.data;
+    },
+    enabled: !!itemId,
+    staleTime: 10_000, // 10 s
+  });
+};
+
 export const useCreateInventoryItem = () => {
   const queryClient = useQueryClient();
   return useMutation({
