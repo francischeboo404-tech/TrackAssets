@@ -12,11 +12,13 @@ type InventoryItemType =
   | "asset"
   | "raw"
   | "finished"
-  | "service";
+  | "service"
+  | "other";
 
 interface InventoryEditFormData {
   name: string;
   sku: string;
+  quantity: number;
   description: string;
   reorder_level: number;
   unit_price: number;
@@ -57,6 +59,7 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
   const [formData, setFormData] = useState<InventoryEditFormData>({
     name: "",
     sku: "",
+    quantity: 0,
     description: "",
     reorder_level: 10,
     unit_price: 0,
@@ -77,6 +80,7 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
       setFormData({
         name: item.name,
         sku: item.sku,
+        quantity: item.quantity,
         description: item.description || "",
         reorder_level: item.reorder_level,
         unit_price: item.unit_price,
@@ -105,6 +109,7 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
         last_purchase_cost: Number(formData.last_purchase_cost),
         lead_time_days: Number(formData.lead_time_days),
         reorder_level: Number(formData.reorder_level),
+        quantity: Number(formData.quantity),
         unit_price: Number(formData.unit_price),
       });
       addToast("success", "Item Updated", `${formData.name} was saved.`);
@@ -198,6 +203,7 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
               <option value="raw">Raw Material</option>
               <option value="finished">Finished Product</option>
               <option value="service">Service</option>
+              <option value="other">Other</option>
             </select>
           </div>
           <div className="space-y-2">
@@ -231,6 +237,17 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
               })
             }
             placeholder="Reorder level"
+          />
+          <input
+            type="number"
+            min={0}
+            required
+            className="input-field w-full"
+            value={formData.quantity}
+            onChange={(e) =>
+              setFormData({ ...formData, quantity: Number(e.target.value) })
+            }
+            placeholder="Quantity"
           />
           <input
             type="number"
@@ -282,14 +299,31 @@ export const InventoryEditModal: React.FC<InventoryEditModalProps> = ({
             <select
               className="input-field w-full"
               value={formData.preferred_supplier_id ?? ""}
-              onChange={(e) =>
+              onChange={(e) => {
+                const supplierId = e.target.value
+                  ? Number(e.target.value)
+                  : undefined;
+                const supplier = suppliers.find(
+                  (supplier: any) => supplier.id === supplierId,
+                );
+                const previousSupplier = suppliers.find(
+                  (supplier: any) =>
+                    supplier.id === formData.preferred_supplier_id,
+                );
+                const shouldAutoFill =
+                  !formData.supplier_item_reference ||
+                  formData.supplier_item_reference === previousSupplier?.code;
+
                 setFormData({
                   ...formData,
-                  preferred_supplier_id: e.target.value
-                    ? Number(e.target.value)
-                    : undefined,
-                })
-              }
+                  preferred_supplier_id: supplierId,
+                  supplier_item_reference: supplier
+                    ? shouldAutoFill
+                      ? supplier.code || ""
+                      : formData.supplier_item_reference
+                    : formData.supplier_item_reference,
+                });
+              }}
             >
               <option value="">Select supplier</option>
               {suppliers.map((supplier: any) => (
