@@ -31,6 +31,9 @@ const PurchaseRequests = lazy(
 const PurchaseOrders = lazy(() => import("./pages/procurement/PurchaseOrders"));
 const GoodsReceipts = lazy(() => import("./pages/receiving/GoodsReceipts"));
 const Suppliers = lazy(() => import("./pages/procurement/Suppliers"));
+const Employees = lazy(() => import("./pages/Employees"));
+const EmployeeDetails = lazy(() => import("./pages/EmployeeDetails"));
+const IssueReturn = lazy(() => import("./pages/IssueReturn"));
 
 const queryClient = new QueryClient();
 
@@ -133,6 +136,30 @@ function AppContent() {
                       element={
                         <ProtectedRoute allowedRoles={["admin"]}>
                           <Departments />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/employees"
+                      element={
+                        <ProtectedRoute allowedRoles={["admin"]}>
+                          <Employees />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/employees/:id"
+                      element={
+                        <ProtectedRoute allowedRoles={["admin"]}>
+                          <EmployeeDetails />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/movements"
+                      element={
+                        <ProtectedRoute allowedRoles={["admin","store_manager"]}>
+                          <IssueReturn />
                         </ProtectedRoute>
                       }
                     />
