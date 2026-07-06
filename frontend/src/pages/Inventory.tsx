@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Package, Search, Plus, Minus, MoreVertical, Filter, AlertCircle, QrCode, ArrowUpRight, ArrowRightLeft, Upload } from 'lucide-react';
 import { useInventory } from '../hooks/useInventory';
+import { useDepartments } from '../hooks/useDepartments';
 import { cn } from '../lib/utils';
 import { StockAdjustmentModal } from '../components/ui/StockAdjustmentModal';
 import { useToast } from '../context/ToastContext';
@@ -37,6 +38,7 @@ const Inventory = () => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [adjustmentType, setAdjustmentType] = useState<'IN' | 'OUT'>('IN');
   const [page, setPage] = useState(1);
+  const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     const q = searchParams.get('q');
@@ -45,10 +47,12 @@ const Inventory = () => {
   const { addToast } = useToast();
   const deleteItem = useDeleteInventoryItem();
   
-  const { data, isLoading } = useInventory({ search: search || undefined, page });
+  const { data, isLoading } = useInventory({ search: search || undefined, page, department_id: departmentId });
   const items = (data as any)?.inventory || [];
   const pagination = (data as any)?.pagination;
   const { user } = useAuth();
+
+  const { data: departments } = useDepartments();
 
   const openAdjustment = (item: any, type: 'IN' | 'OUT') => {
     setSelectedItem(item);
@@ -140,6 +144,18 @@ const Inventory = () => {
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               className="w-full bg-slate-50 border border-slate-200/60 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-4 focus:ring-brand-primary/10 focus:bg-white focus:border-brand-primary/30 transition-all duration-300 outline-none shadow-inner shadow-slate-100/50"
             />
+          </div>
+          <div className="ml-4">
+            <select
+              value={departmentId ?? ''}
+              onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : undefined)}
+              className="bg-white border border-slate-200/60 rounded-xl py-2 pl-3 pr-8 text-sm focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/30 transition-all duration-300 outline-none shadow-sm"
+            >
+              <option value="">All Departments</option>
+              {departments?.map((d: any) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
           </div>
           <div className="flex items-center gap-4 text-[13px] text-slate-500 font-semibold bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
              <span>{pagination ? `Total Assets: ${pagination.total}` : `Showing ${items?.length || 0} items`}</span>
