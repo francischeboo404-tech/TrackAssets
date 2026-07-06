@@ -16,7 +16,8 @@ declare module 'axios' {
 }
 
 // Choose a sensible default: prefer VITE_API_URL, otherwise
-// when running on Vercel use the known Render backend, else use local '/api'.
+// when running locally target the Flask backend directly, on Vercel use the
+// known Render backend, otherwise use Vite's local '/api' proxy.
 const resolvedBase = (() => {
   const envBase = import.meta.env.VITE_API_URL;
   if (envBase) {
@@ -24,6 +25,9 @@ const resolvedBase = (() => {
   }
   if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
     return 'https://trackit-uxil.onrender.com';
+  }
+  if (typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)) {
+    return 'http://localhost:5000';
   }
   return '/api';
 })();
