@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   FileText, 
   FileSpreadsheet, 
@@ -22,6 +22,7 @@ import { canAccess } from '../lib/permissions';
 import type { UserRole } from '../types';
 import type { ReportFormat } from '../hooks/useReports';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { checkRechartsContainers } from '../lib/chartSizeChecker';
 import { useNavigate } from 'react-router-dom';
 
 type ReportCardFormat = ReportFormat;
@@ -119,6 +120,22 @@ const Reports = () => {
     });
   };
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        checkRechartsContainers();
+      } catch (e) {
+        // ignore
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [summary, isLoading]);
+
+  // Run a deferred check for Recharts container sizes when summary/loading changes
+  useState(() => {}); // keep React import usage stable
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  ;
+
   return (
     <div className="max-w-7xl mx-auto space-y-12 pb-20 relative">
       <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-brand-primary/5 rounded-full blur-[150px] -mr-48 -mt-48 pointer-events-none" />
@@ -201,12 +218,12 @@ const Reports = () => {
 
       {/* Intelligence Data Visualization */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 relative z-10 mb-8">
-        <div className="lg:col-span-2 enterprise-card p-8 bg-white border-none shadow-xl shadow-slate-200/50">
+        <div className="lg:col-span-2 enterprise-card p-8 bg-white border-none shadow-xl shadow-slate-200/50 min-w-0" style={{ minWidth: 0 }}>
            <h3 className="text-xl font-bold text-slate-900 mb-6 flex items-center gap-2">
              <FileText className="w-5 h-5 text-brand-primary" />
              Ledger Valuation Distribution
            </h3>
-           <div className="h-64">
+           <div className="h-64 min-h-[180px] min-w-0" style={{ minWidth: 0 }}>
              {!isLoading && summary ? (
                <ResponsiveContainer width="100%" height="100%">
                  <PieChart>
@@ -235,6 +252,11 @@ const Reports = () => {
                </div>
              )}
            </div>
+
+          {/* run a deferred check for zero-size Recharts containers */}
+          <script
+            dangerouslySetInnerHTML={{ __html: `setTimeout(()=>{try{(window.__checkRecharts||(()=>{}))()}catch(e){}} ,350)` }}
+          />
            <div className="flex justify-center gap-8 mt-4">
              <div className="flex items-center gap-2">
                <div className="w-3 h-3 rounded-full bg-blue-500" />
