@@ -1,38 +1,51 @@
-import React, { useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Lock, Mail, ArrowRight, ShieldCheck, Activity, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
-import api from '../services/api';
+import React, { useState } from "react";
+import { useNavigate, useLocation, Link } from "react-router-dom";
+import { motion } from "framer-motion";
+import {
+  Lock,
+  Mail,
+  ArrowRight,
+  ShieldCheck,
+  Activity,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
+import api from "../services/api";
 
-import { Logo } from '../components/ui/Logo';
+import { Logo } from "../components/ui/Logo";
 
 const LoginPage = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const { login } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state?.from?.pathname || '/') + (location.state?.from?.search || '');
+  const from =
+    (location.state?.from?.pathname || "/") +
+    (location.state?.from?.search || "");
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
     try {
-      const response = await api.post('/auth/login', { email, password });
-      const { user, access_token } = response.data;
+      const response = await api.post("/auth/login", { email, password });
+      const { user, access_token, refresh_token } = response.data;
 
-      login(access_token ?? '', user);
-      addToast('success', 'Welcome back to TrackIT');
+      login(access_token ?? "", user, refresh_token ?? null);
+      addToast("success", "Welcome back to TrackIT");
       navigate(from, { replace: true });
     } catch (err: any) {
-      addToast('error', err.response?.data?.message || 'Invalid email or password');
+      addToast(
+        "error",
+        err.response?.data?.message || "Invalid email or password",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -43,10 +56,13 @@ const LoginPage = () => {
       {/* Background Decorative Elements */}
       <div className="absolute top-0 left-0 w-full h-full opacity-60 pointer-events-none">
         <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-400 rounded-full blur-[120px] animate-pulse"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-400 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '2s' }}></div>
+        <div
+          className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-400 rounded-full blur-[120px] animate-pulse"
+          style={{ animationDelay: "2s" }}
+        ></div>
       </div>
 
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: "easeOut" }}
@@ -56,7 +72,9 @@ const LoginPage = () => {
           {/* Header */}
           <div className="mb-10 flex flex-col items-center">
             <Logo className="mb-2" />
-            <p className="text-slate-500 text-sm font-medium">Enterprise Asset Management</p>
+            <p className="text-slate-500 text-sm font-medium">
+              Enterprise Asset Management
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -80,7 +98,7 @@ const LoginPage = () => {
                   <Lock className="w-5 h-5" />
                 </div>
                 <input
-                  type={showPassword ? 'text' : 'password'}
+                  type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Password"
@@ -92,17 +110,29 @@ const LoginPage = () => {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
                 >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
                 </button>
               </div>
             </div>
 
             <div className="flex items-center justify-between text-sm font-medium text-slate-500 px-1">
               <label className="flex items-center gap-2 cursor-pointer hover:text-brand-primary transition-colors">
-                <input type="checkbox" className="rounded-sm bg-white border-slate-300 text-brand-primary focus:ring-brand-primary/20" />
+                <input
+                  type="checkbox"
+                  className="rounded-sm bg-white border-slate-300 text-brand-primary focus:ring-brand-primary/20"
+                />
                 <span>Remember me</span>
               </label>
-              <a href="#" className="hover:text-brand-primary transition-colors">Forgot password?</a>
+              <a
+                href="#"
+                className="hover:text-brand-primary transition-colors"
+              >
+                Forgot password?
+              </a>
             </div>
 
             <button
@@ -124,7 +154,13 @@ const LoginPage = () => {
           {/* Footer Info */}
           <div className="mt-10 pt-8 border-t border-slate-100 text-center">
             <p className="mt-8 text-center text-xs font-bold text-slate-400 uppercase tracking-widest">
-              New Institution? <Link to="/register" className="text-indigo-600 hover:text-indigo-700 underline decoration-indigo-200 underline-offset-4">Register Workspace</Link>
+              New Institution?{" "}
+              <Link
+                to="/register"
+                className="text-indigo-600 hover:text-indigo-700 underline decoration-indigo-200 underline-offset-4"
+              >
+                Register Workspace
+              </Link>
             </p>
           </div>
         </div>
@@ -133,7 +169,9 @@ const LoginPage = () => {
         <div className="mt-8 flex justify-center gap-8">
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span className="text-xs text-slate-500 font-medium">System Online</span>
+            <span className="text-xs text-slate-500 font-medium">
+              System Online
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-1.5 h-1.5 rounded-full bg-brand-primary"></div>
