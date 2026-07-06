@@ -50,10 +50,11 @@ const ASSET_COLUMNS = [
 const INVENTORY_COLUMNS = [
   { key: "name", label: "Name", required: true },
   { key: "sku", label: "SKU", required: false },
+  { key: "quantity", label: "Quantity", required: true },
   { key: "description", label: "Description", required: false },
   { key: "unit", label: "Unit", required: false },
   { key: "unit_price", label: "Unit Price", required: true },
-  { key: "reorder_level", label: "Reorder Level", required: false },
+  { key: "reorder_level", label: "Reorder Level", required: true },
   { key: "category_id", label: "Category ID", required: false },
   { key: "item_type", label: "Item Type", required: false },
   { key: "status", label: "Status", required: false },
@@ -75,6 +76,7 @@ const INVENTORY_COLUMNS = [
   { key: "max_stock_level", label: "Max Stock Level", required: false },
   { key: "safety_stock", label: "Safety Stock", required: false },
   { key: "opening_stock", label: "Opening Stock", required: false },
+  { key: "warehouse_name", label: "Warehouse Name (e.g. MAIN WAREHOUSE)", required: false },
   { key: "batch_tracking", label: "Batch Tracking", required: false },
   { key: "serial_tracking", label: "Serial Tracking", required: false },
   { key: "expiry_tracking", label: "Expiry Tracking", required: false },
@@ -143,6 +145,16 @@ function coerceRow(
       row.safety_stock = Number(row.safety_stock);
     if (row.opening_stock !== undefined && row.opening_stock !== "")
       row.opening_stock = Number(row.opening_stock);
+    // warehouse_name: trim whitespace and uppercase so the backend can do
+    // a case-insensitive match. Delete if empty so the field is absent.
+    if (row.warehouse_name !== undefined) {
+      const wn = String(row.warehouse_name).trim().toUpperCase();
+      if (wn) {
+        row.warehouse_name = wn;
+      } else {
+        delete row.warehouse_name;
+      }
+    }
     const booleanFields = [
       "batch_tracking",
       "serial_tracking",
@@ -157,6 +169,7 @@ function coerceRow(
     [
       "sku",
       "description",
+      "quantity",
       "unit",
       "item_type",
       "status",
@@ -176,6 +189,9 @@ function coerceRow(
     if (!row.max_stock_level) delete row.max_stock_level;
     if (!row.safety_stock) delete row.safety_stock;
     if (!row.opening_stock) delete row.opening_stock;
+    // warehouse_name already handled above; also guard against falsy numeric warehouse_id
+    if (!row.warehouse_name) delete row.warehouse_name;
+    if (row.warehouse_id !== undefined && !row.warehouse_id) delete row.warehouse_id;
   }
   return row;
 }
