@@ -26,18 +26,22 @@ export interface TransferRequestPayload {
   item_type?: 'asset' | 'inventory';
   to_user_id?: number;
   new_department_id?: number;
+  from_department_id?: number;
   to_warehouse_id?: number;
   to_bin_id?: number;
   new_location?: string;
   comment?: string;
 }
 
-export const useTransferRequests = (status: 'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected' = 'pending', page = 1, search?: string) => {
+export const useTransferRequests = (status: 'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected' = 'pending', page = 1, search?: string, departmentId?: number) => {
   return useQuery({
-    queryKey: ['transfer-requests', status, page, search],
+    queryKey: ['transfer-requests', status, page, search, departmentId],
     queryFn: async () => {
+      const params: any = { status, page };
+      if (search) params.search = search;
+      if (departmentId) params.department_id = departmentId;
       const response = await api.get<{ transfer_requests: TransferRequest[], pagination: any }>('/transfers/requests', {
-        params: { status, page, search }
+        params
       });
       return response.data;
     }
