@@ -29,6 +29,14 @@ export const useSSE = () => {
             queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
             queryClient.invalidateQueries({ queryKey: ['dashboard-movements'] });
             break;
+          case 'ITEM_ISSUED':
+          case 'ITEM_RETURNED':
+            queryClient.invalidateQueries({ queryKey: ['inventory'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+            queryClient.invalidateQueries({ queryKey: ['dashboard-movements'] });
+            queryClient.invalidateQueries({ queryKey: ['item-movements'] });
+            queryClient.invalidateQueries({ queryKey: ['audit-logs'] });
+            break;
           case 'NEW_ALERT':
           case 'RESTOCK_ALERT':
             queryClient.invalidateQueries({ queryKey: ['active-alerts'] });
