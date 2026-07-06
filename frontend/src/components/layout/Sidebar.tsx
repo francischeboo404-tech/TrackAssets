@@ -46,6 +46,8 @@ const NAV_ITEMS = [
   { icon: BarChart3, label: "Analytics", path: "/analytics" },
   { icon: FileText, label: "Reports", path: "/reports" },
   { icon: Building2, label: "Departments", path: "/departments" },
+  { icon: UsersIcon, label: "Employees", path: "/employees" },
+  { icon: ArrowRightLeft, label: "Departmental Movements", path: "/movements" },
   { icon: History, label: "Audit Logs", path: "/audit-logs" },
   { icon: SettingsIcon, label: "Settings", path: "/settings" },
 ];
@@ -74,6 +76,8 @@ const NAV_ITEM_ROLES: Record<string, UserRole[]> = {
   "/users": ["admin"],
   "/departments": ["admin"],
   "/settings": ["admin"],
+  "/employees": ["admin"],
+  "/movements": ["admin", "store_manager"],
   "/reports": [
     "admin",
     "superadmin",
@@ -156,6 +160,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               "/transfers",
               "/warehouses",
               "/tracking",
+              "/movements",
             ].includes(i.path),
           ).map((item) => {
             const displayLabel = ROUTE_LABEL_OVERRIDES[item.path] || item.label;
@@ -265,6 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
               "/users",
               "/reports",
               "/departments",
+              "/employees",
               "/audit-logs",
               "/settings",
             ].includes(i.path),
