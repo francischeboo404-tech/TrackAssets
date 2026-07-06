@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Warehouse as WarehouseIcon, Box, ArrowRightLeft, Thermometer, Percent, Info, ArrowRight, Edit2, Trash2 } from 'lucide-react';
-import { useWarehouses, useDeleteWarehouse } from '../hooks/useWarehouses';
+import { Warehouse as WarehouseIcon, Box, ArrowRightLeft, Thermometer, Percent, Info, ArrowRight, Edit2, Trash2, Loader2, Save } from 'lucide-react';
+import { useWarehouses, useDeleteWarehouse, useWarehouseBins, useUpdateBin, useDeleteBin } from '../hooks/useWarehouses';
 import { BinModal } from '../components/ui/BinModal';
 import { WarehouseModal } from '../components/ui/WarehouseModal';
 import { useToast } from '../context/ToastContext';
@@ -15,6 +15,12 @@ const Warehouses = () => {
   const [warehouseToEdit, setWarehouseToEdit] = useState<{id: number, name: string, code: string, address?: string} | null>(null);
   const [isBinModalOpen, setIsBinModalOpen] = useState(false);
   const [isWarehouseModalOpen, setIsWarehouseModalOpen] = useState(false);
+  const [expandedBinsWarehouseId, setExpandedBinsWarehouseId] = useState<number | null>(null);
+  const { data: binsForSelected = [], isLoading: binsLoading } = useWarehouseBins(expandedBinsWarehouseId || undefined as any);
+  const updateBin = useUpdateBin();
+  const deleteBinInline = useDeleteBin();
+  const [editingBinId, setEditingBinId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({ code: '', description: '' });
   const { addToast } = useToast();
 
   return (
@@ -60,9 +66,12 @@ const Warehouses = () => {
           [1, 2].map(i => <div key={i} className="glass-card h-80 animate-pulse bg-slate-50/50" />)
         ) : (
           <AnimatePresence>
-            {utilization?.map((wh: any, idx: number) => (
+            {utilization?.map((wh: any, idx: number) => {
+              const warehouseKey = wh?.warehouse_id ?? wh?.id ?? `${wh?.warehouse_name ?? 'warehouse'}-${idx}`;
+
+              return (
               <motion.div 
-                key={wh.warehouse_id} 
+                key={warehouseKey} 
                 initial={{ opacity: 0, y: 20, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ delay: idx * 0.1, duration: 0.4 }}
@@ -135,12 +144,12 @@ const Warehouses = () => {
                   </div>
                 </div>
 
-                <div className="px-8 py-5 border-t border-slate-100/60 bg-white/50 flex justify-between items-center mt-auto">
+                <div className="px-8 py-5 border-t border-slate-100/60 bg-white/50 flex flex-col gap-3 mt-auto">
                    <Can roles={['admin']}>
                      <div className="flex gap-2">
                        <button 
                          onClick={() => {
-                           setWarehouseToEdit({ id: wh.warehouse_id, name: wh.warehouse_name, code: wh.warehouse_code, address: wh.address });
+                          setWarehouseToEdit({ id: wh.warehouse_id ?? wh.id, name: wh.warehouse_name ?? wh.name, code: wh.warehouse_code ?? wh.code, address: wh.address });
                            setIsWarehouseModalOpen(true);
                          }}
                          className="p-2 text-slate-400 hover:text-brand-primary hover:bg-brand-50 rounded-xl transition-colors"
@@ -151,7 +160,7 @@ const Warehouses = () => {
                        <button 
                          onClick={() => {
                            if (window.confirm(`Are you sure you want to delete ${wh.warehouse_name}?`)) {
-                             deleteWarehouse(wh.warehouse_id, {
+                             deleteWarehouse(wh.warehouse_id ?? wh.id, {
                                onSuccess: () => addToast('success', 'Deleted', 'Warehouse successfully removed.'),
                                onError: () => addToast('error', 'Error', 'Failed to delete warehouse.')
                              });
@@ -165,20 +174,82 @@ const Warehouses = () => {
                        </button>
                      </div>
                    </Can>
-                   <Can roles={['admin', 'store_manager']}>
-                     <button 
-                       onClick={() => {
-                         setSelectedWarehouse({ id: wh.warehouse_id, name: wh.warehouse_name });
-                         setIsBinModalOpen(true);
-                       }}
-                       className="text-[11px] font-bold text-brand-primary hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 group/btn uppercase tracking-widest"
-                     >
-                       Manage Bins <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-1 transition-transform" />
-                     </button>
-                   </Can>
+                   <div className="flex items-center justify-between">
+                     <Can roles={['admin', 'store_manager']}>
+                       <div className="flex gap-2">
+                         <button
+                           onClick={() => {
+                             setSelectedWarehouse({ id: wh.warehouse_id ?? wh.id, name: wh.warehouse_name ?? wh.name });
+                             setIsBinModalOpen(true);
+                           }}
+                           className="text-[11px] font-bold text-brand-primary hover:text-brand-700 bg-brand-50 hover:bg-brand-100 px-4 py-2 rounded-xl transition-colors flex items-center gap-1.5 group/btn uppercase tracking-widest"
+                         >
+                           Manage Bins <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-1 transition-transform" />
+                         </button>
+
+                         <button
+                           onClick={() => setExpandedBinsWarehouseId(expandedBinsWarehouseId === (wh.warehouse_id ?? wh.id) ? null : (wh.warehouse_id ?? wh.id))}
+                           className="text-[11px] font-medium text-slate-600 bg-slate-50 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors"
+                         >
+                           {expandedBinsWarehouseId === (wh.warehouse_id ?? wh.id) ? 'Hide bins' : 'Show bins'}
+                         </button>
+                       </div>
+                     </Can>
+                   </div>
+                   {expandedBinsWarehouseId === wh.warehouse_id && (
+                     <div className="w-full mt-3 bg-slate-50 p-4 rounded-xl border">
+                       <h4 className="font-bold text-sm mb-2">Bins</h4>
+                       {binsLoading ? (
+                         <div className="text-sm text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin"/> Loading...</div>
+                       ) : binsForSelected.length === 0 ? (
+                         <div className="text-sm text-slate-500">No bins available for this warehouse.</div>
+                       ) : (
+                         <div className="space-y-2">
+                           {binsForSelected.map((b: any) => (
+                             <div key={b.id} className="flex items-center justify-between p-3 bg-white rounded-md border">
+                               <div>
+                                 <div className="font-mono font-bold">{b.code}</div>
+                                 <div className="text-xs text-slate-500">{b.description || '—'}</div>
+                               </div>
+                               <div className="flex items-center gap-2">
+                                 <span className="text-xs px-2 py-1 rounded-lg bg-slate-100">{b.status}</span>
+                                 <Can roles={['admin', 'store_manager']}>
+                                   {editingBinId === b.id ? (
+                                     <div className="flex items-center gap-2">
+                                       <input className="input-field w-36" value={editForm.code} onChange={e => setEditForm({...editForm, code: e.target.value.toUpperCase()})} />
+                                       <input className="input-field w-56" value={editForm.description} onChange={e => setEditForm({...editForm, description: e.target.value})} />
+                                       <button className="p-2 bg-emerald-500 text-white rounded" onClick={async () => {
+                                         try {
+                                           await updateBin.mutateAsync({ warehouseId: wh.warehouse_id ?? wh.id, binId: b.id, data: { code: editForm.code, description: editForm.description } });
+                                           setEditingBinId(null);
+                                           setEditForm({ code: '', description: '' });
+                                         } catch (err) {
+                                           // toast handled elsewhere
+                                         }
+                                       }}><Save className="w-4 h-4"/></button>
+                                       <button className="p-2 bg-slate-200 rounded" onClick={() => { setEditingBinId(null); setEditForm({ code: '', description: '' }); }}>Cancel</button>
+                                     </div>
+                                   ) : (
+                                     <div className="flex gap-2">
+                                       <button className="p-2 text-slate-500 hover:text-brand-primary" onClick={() => { setEditingBinId(b.id); setEditForm({ code: b.code, description: b.description || '' }); }} title="Edit Bin"><Edit2 className="w-4 h-4"/></button>
+                                       <button className="p-2 text-rose-600 hover:bg-rose-50 rounded" onClick={async () => {
+                                         if (!window.confirm(`Delete bin ${b.code}?`)) return;
+                                           try { await deleteBinInline.mutateAsync({ warehouseId: wh.warehouse_id ?? wh.id, binId: b.id }); } catch (err) {}
+                                       }} title="Delete Bin"><Trash2 className="w-4 h-4"/></button>
+                                     </div>
+                                   )}
+                                 </Can>
+                               </div>
+                             </div>
+                           ))}
+                         </div>
+                       )}
+                     </div>
+                   )}
                 </div>
               </motion.div>
-            ))}
+              );
+            })}
           </AnimatePresence>
         )}
         
