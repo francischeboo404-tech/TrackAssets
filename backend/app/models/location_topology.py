@@ -3,7 +3,7 @@ from app import db
 
 
 class Warehouse(db.Model):
-    """Main warehouse facility"""
+    """Main warehouse facility with hierarchical support for multi-location inventory"""
 
     __tablename__ = "warehouses"
 
@@ -14,10 +14,27 @@ class Warehouse(db.Model):
     name = db.Column(db.String(255), nullable=False)
     code = db.Column(db.String(50), nullable=False)
     address = db.Column(db.String(500))
+    
+    # Warehouse Hierarchy Support
+    parent_warehouse_id = db.Column(
+        db.Integer, db.ForeignKey("warehouses.id"), nullable=True
+    )
+    is_main_warehouse = db.Column(db.Boolean, default=False)
+    warehouse_type = db.Column(
+        db.String(50), 
+        default="storage_facility",
+        nullable=False
+    )  # 'main' | 'storage_facility'
+    hierarchy_level = db.Column(db.Integer, default=0)  # 0=main, 1=direct child, etc.
+    
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    __table_args__ = (db.Index("ix_warehouses_org_id", "organisation_id"),)
+    __table_args__ = (
+        db.Index("ix_warehouses_org_id", "organisation_id"),
+        db.Index("ix_warehouses_parent_id", "parent_warehouse_id"),
+        db.Index("ix_warehouses_is_main", "is_main_warehouse"),
+    )
 
     zones = db.relationship(
         "WarehouseZone",
@@ -25,6 +42,36 @@ class Warehouse(db.Model):
         lazy=True,
         cascade="all, delete-orphan",
     )
+    
+    # Self-referential relationship for parent-child warehouse hierarchy
+    parent_warehouse = db.relationship(
+        "Warehouse",
+        remote_side=[id],
+        backref="child_warehouses",
+        foreign_keys=[parent_warehouse_id]
+    )
+
+    def get_hierarchy_path(self):
+        """Get the full hierarchy path for this warehouse"""
+        path = [self.id]
+        current = self
+        while current.parent_warehouse_id:
+            path.insert(0, current.parent_warehouse_id)
+            current = self.__class__.query.filter_by(
+                id=current.parent_warehouse_id
+            ).first()
+        return path
+
+    def is_child_of(self, warehouse_id):
+        """Check if this warehouse is a child of the given warehouse"""
+        current = self
+        while current.parent_warehouse_id:
+            if current.parent_warehouse_id == warehouse_id:
+                return True
+            current = self.__class__.query.filter_by(
+                id=current.parent_warehouse_id
+            ).first()
+        return False
 
 
 class WarehouseZone(db.Model):

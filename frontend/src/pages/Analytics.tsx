@@ -29,6 +29,8 @@ import { useAuth } from '../context/AuthContext';
 import { canAccess } from '../lib/permissions';
 import type { UserRole } from '../types';
 import { cn } from '../lib/utils';
+import { checkRechartsContainers } from '../lib/chartSizeChecker';
+import { useDepartments } from '../hooks/useDepartments';
 
 type TabId = 'overview' | 'assets' | 'inventory' | 'tracking';
 
@@ -43,22 +45,29 @@ const Analytics = () => {
   const { user } = useAuth();
   const [days, setDays] = useState(30);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
+  const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
   const [exportOpen, setExportOpen] = useState(false);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const analyticsExport = useAnalyticsExport();
 
   const visibleTabs = TABS.filter((t) => canAccess(user?.role, t.roles));
 
-  const dashboard = useDashboardReport(days);
-  const assetsReport = useAssetsReport(days, activeTab === 'assets' || activeTab === 'overview');
+  const { data: departments = [] } = useDepartments();
+
+  const dashboard = useDashboardReport(days, departmentId);
+  const assetsReport = useAssetsReport(days, activeTab === 'assets' || activeTab === 'overview', departmentId);
   const inventoryReport = useInventoryReport(
     days,
     activeTab === 'inventory' || activeTab === 'overview',
+    departmentId,
   );
   const trackingReport = useTrackingReport(
     days,
     activeTab === 'tracking' || activeTab === 'overview',
+    departmentId,
   );
+
+  
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -69,6 +78,18 @@ const Analytics = () => {
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
+
+  // Run a deferred check for Recharts container sizes whenever tab/loading state changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        checkRechartsContainers();
+      } catch (err) {
+        // swallow - we only want to surface via console
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [activeTab, dashboard.isLoading, assetsReport.isLoading, inventoryReport.isLoading, trackingReport.isLoading]);
 
   const kpis = dashboard.data?.kpis;
   const currency = kpis?.currency ?? 'KES';
@@ -109,6 +130,16 @@ const Analytics = () => {
             <option value={30}>Last 30 days</option>
             <option value={90}>Last 90 days</option>
           </select>
+            <select
+              value={departmentId ?? ''}
+              onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : undefined)}
+              className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-700"
+            >
+              <option value="">All Departments</option>
+              {departments.map((d: any) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
           <button
             type="button"
             onClick={refetchAll}

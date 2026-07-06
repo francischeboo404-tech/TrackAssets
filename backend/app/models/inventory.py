@@ -43,6 +43,7 @@ class InventoryItem(db.Model):
     max_stock_level = db.Column(db.Integer, nullable=True)
     safety_stock = db.Column(db.Integer, nullable=True)
     opening_stock = db.Column(db.Integer, nullable=True)
+    warehouse_id = db.Column(db.Integer, db.ForeignKey('warehouses.id'), nullable=True)
     # Traceability flags
     batch_tracking = db.Column(db.Boolean, default=False)
     serial_tracking = db.Column(db.Boolean, default=False)
@@ -103,7 +104,8 @@ class InventoryItem(db.Model):
     def add_stock(self, quantity, warehouse_id=None, reference=None, notes=None):
         """Add stock (IN movement) with row-level locking and warehouse sync"""
         if quantity <= 0:
-            raise ValueError("Quantity must be greater than 0")
+            from app.errors import ValidationError
+            raise ValidationError("Quantity must be greater than 0")
 
         # Reload with lock
         item = InventoryItem.query.with_for_update().get(self.id)
@@ -144,12 +146,14 @@ class InventoryItem(db.Model):
     def remove_stock(self, quantity, warehouse_id=None, reference=None, notes=None):
         """Remove stock (OUT movement) with row-level locking and warehouse sync"""
         if quantity <= 0:
-            raise ValueError("Quantity must be greater than 0")
+            from app.errors import ValidationError
+            raise ValidationError("Quantity must be greater than 0")
 
         # Reload with lock
         item = InventoryItem.query.with_for_update().get(self.id)
         if item.quantity < quantity:
-            raise ValueError("Insufficient total stock")
+            from app.errors import ValidationError
+            raise ValidationError("Insufficient total stock")
 
         # Update Warehouse Stock if provided
         
@@ -173,7 +177,8 @@ class InventoryItem(db.Model):
                 print("Available:", wh_stock.quantity_available)    
             
             if not wh_stock or wh_stock.quantity_on_hand < quantity:
-                raise ValueError("Insufficient stock in specified warehouse")
+                from app.errors import ValidationError
+                raise ValidationError("Insufficient stock in specified warehouse")
             
             wh_stock.quantity_on_hand -= quantity
 
@@ -250,18 +255,29 @@ class StockMovement(db.Model):
     item_id = db.Column(
         db.Integer, db.ForeignKey("inventory_items.id"), nullable=False
     )
+    organization_id = db.Column(
+        db.Integer, db.ForeignKey("organizations.id"), nullable=True
+    )
+    warehouse_id = db.Column(
+        db.Integer, db.ForeignKey("warehouses.id"), nullable=True
+    )
     type = db.Column(db.String(10), nullable=False)
     quantity = db.Column(db.Integer, nullable=False)
+    before_quantity = db.Column(db.Integer, nullable=True)
+    after_quantity = db.Column(db.Integer, nullable=True)
     reference = db.Column(db.String(255))
     notes = db.Column(db.Text)
-
-    __table_args__ = (
-        db.Index("ix_stock_movements_date", "date"),
-        db.Index("ix_stock_movements_item_date", "item_id", "date"),
-        db.Index("ix_stock_movements_type", "type"),
-    )
     date = db.Column(db.DateTime, default=datetime.utcnow)
+    # destination_warehouse_id: set when an OUT movement is a warehouse transfer
+    destination_warehouse_id = db.Column(
+        db.Integer, db.ForeignKey("warehouses.id"), nullable=True
+    )
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
 
     __table_args__ = (
         db.CheckConstraint(
@@ -273,6 +289,7 @@ class StockMovement(db.Model):
         db.Index("ix_stock_movements_item_id", "item_id"),
         db.Index("ix_stock_movements_type", "type"),
         db.Index("ix_stock_movements_date", "date"),
+        db.Index("ix_stock_movements_item_date", "item_id", "date"),
     )
 
     def __repr__(self):
@@ -292,8 +309,11 @@ class AuditLog(db.Model):
     action = db.Column(db.String(100), nullable=False)
     entity_type = db.Column(db.String(100))
     entity_id = db.Column(db.Integer)
+    reference = db.Column(db.String(255), nullable=True)
+    module = db.Column(db.String(100), nullable=True)
     details = db.Column(db.JSON)
     ip_address = db.Column(db.String(45))
+    user_agent = db.Column(db.String(255))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
@@ -301,6 +321,7 @@ class AuditLog(db.Model):
         db.Index("ix_audit_logs_user_id", "user_id"),
         db.Index("ix_audit_logs_entity", "entity_type", "entity_id"),
         db.Index("ix_audit_logs_action", "action"),
+        db.Index("ix_audit_logs_module", "module"),
         db.Index("ix_audit_logs_created_at", "created_at"),
     )
 

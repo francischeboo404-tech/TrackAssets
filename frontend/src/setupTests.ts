@@ -1,3 +1,5 @@
+import '@testing-library/jest-dom';
+
 // Minimal polyfills and test setup for Vitest + jsdom
 // Provide IntersectionObserver for components that use it.
 class DummyIntersectionObserver {

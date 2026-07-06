@@ -5,15 +5,16 @@ from app.rbac import is_read_only_role, is_privileged, normalize_role
 
 # Spec mapping: Logistics → staff/store_manager; Viewer → read-only verify/audit
 SCAN_ACTION_ROLES = {
+    # Use canonical role names (normalized) to avoid alias mismatches
     "VERIFY": frozenset(
-        {"admin", "staff", "store_manager", "dept_head", "viewer", "auditor"}
+        {"admin", "logistics_officer", "store_manager", "procurement_officer", "employee", "auditor"}
     ),
     "AUDIT": frozenset(
-        {"admin", "staff", "store_manager", "dept_head", "viewer", "auditor"}
+        {"admin", "logistics_officer", "store_manager", "procurement_officer", "employee", "auditor"}
     ),
-    "CHECK_IN": frozenset({"admin", "staff", "store_manager"}),
-    "CHECK_OUT": frozenset({"admin", "staff", "store_manager"}),
-    "TRANSFER": frozenset({"admin", "staff", "store_manager", "dept_head"}),
+    "CHECK_IN": frozenset({"admin", "logistics_officer", "store_manager"}),
+    "CHECK_OUT": frozenset({"admin", "logistics_officer", "store_manager"}),
+    "TRANSFER": frozenset({"admin", "logistics_officer", "store_manager", "procurement_officer"}),
 }
 
 READ_ONLY_ACTIONS = frozenset({"VERIFY", "AUDIT"})

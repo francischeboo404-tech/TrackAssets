@@ -143,6 +143,7 @@ class DepartmentSchema(Schema):
         load_default=[],
         allow_none=True,
     )
+    warehouse_id = fields.Int(required=True, validate=validate.Range(min=1))
 
 
 class DepartmentUpdateSchema(Schema):
@@ -178,6 +179,7 @@ class DepartmentUpdateSchema(Schema):
         fields.Str(validate=validate.Length(min=1, max=100)),
         allow_none=True,
     )
+    warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
 
 
 class AssetSchema(Schema):
@@ -258,6 +260,7 @@ class TransferRequestSchema(Schema):
     quantity = fields.Int(validate=validate.Range(min=1), missing=1)
     # Required for department_to_department (and inventory transfers)
     new_department_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
+    from_department_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     # Required for employee_to_employee
     to_user_id = fields.Int(validate=validate.Range(min=1), load_default=None, allow_none=True)
     new_location = fields.Str(validate=validate.Length(max=255), allow_none=True)
@@ -301,7 +304,7 @@ class InventoryItemSchema(Schema):
     unit_price = fields.Float(required=True, validate=validate.Range(min=0))
     unit = fields.Str(validate=validate.Length(max=50))
     category_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
-    item_type = fields.Str(validate=validate.OneOf(["consumable", "asset", "raw", "finished", "service"]), load_default="consumable")
+    item_type = fields.Str(validate=validate.OneOf(["consumable", "asset", "raw", "finished", "service", "other"]), load_default="consumable")
     status = fields.Str(validate=validate.Length(max=50), load_default="active")
     preferred_supplier_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     supplier_item_reference = fields.Str(validate=validate.Length(max=255), allow_none=True)
@@ -313,15 +316,59 @@ class InventoryItemSchema(Schema):
     max_stock_level = fields.Int(validate=validate.Range(min=0), allow_none=True)
     safety_stock = fields.Int(validate=validate.Range(min=0), allow_none=True)
     opening_stock = fields.Int(validate=validate.Range(min=0), allow_none=True)
+    warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
+    warehouse_name = fields.Str(validate=validate.Length(max=255), allow_none=True, load_default=None)
     batch_tracking = fields.Boolean(load_default=False)
     serial_tracking = fields.Boolean(load_default=False)
     expiry_tracking = fields.Boolean(load_default=False)
+
+    # Nullable integer fields that CSV parsing can deliver as empty strings or
+    # non-numeric text (e.g. a warehouse *name* instead of its numeric ID).
+    _NULLABLE_INT_FIELDS = (
+        "category_id", "preferred_supplier_id", "lead_time_days",
+        "min_stock_level", "max_stock_level", "safety_stock",
+        "opening_stock", "warehouse_id", "quantity", "reorder_level",
+    )
+    _NULLABLE_FLOAT_FIELDS = (
+        "unit_price", "purchase_cost", "last_purchase_cost",
+    )
+
+    @pre_load
+    def coerce_numeric_strings(self, data, **kwargs):
+        """Convert empty strings → None and numeric strings → proper types.
+
+        This makes the schema resilient to CSV-parsed data where every cell
+        arrives as a string and optional cells arrive as an empty string "".
+        """
+        result = dict(data)
+        for field in self._NULLABLE_INT_FIELDS:
+            val = result.get(field)
+            if val == "" or val is None:
+                result[field] = None
+            elif isinstance(val, str):
+                try:
+                    result[field] = int(val)
+                except (ValueError, TypeError):
+                    # Leave as-is so Marshmallow can produce a proper error msg
+                    pass
+        for field in self._NULLABLE_FLOAT_FIELDS:
+            val = result.get(field)
+            if val == "" or val is None:
+                result[field] = None
+            elif isinstance(val, str):
+                try:
+                    result[field] = float(val)
+                except (ValueError, TypeError):
+                    pass
+        return result
 
 
 class StockMovementSchema(Schema):
     type = fields.Str(required=True, validate=validate.OneOf(["IN", "OUT"]))
     quantity = fields.Int(required=True, validate=validate.Range(min=1))
     warehouse_id = fields.Int(validate=validate.Range(min=1))
+    # For OUT movements that are warehouse transfers, specify the receiving warehouse
+    destination_warehouse_id = fields.Int(validate=validate.Range(min=1), allow_none=True)
     reference = fields.Str(validate=validate.Length(max=255))
     notes = fields.Str(validate=validate.Length(max=1000))
 

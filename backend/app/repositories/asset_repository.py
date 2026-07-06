@@ -25,7 +25,10 @@ class AssetRepository:
         if department_id:
             query = query.filter_by(department_id=department_id)
         if search:
-            query = query.outerjoin(organization.Department).outerjoin(
+            query = query.outerjoin(
+                organization.Department,
+                asset.Asset.department_id == organization.Department.id
+            ).outerjoin(
                 location_topology.Warehouse, asset.Asset.warehouse_id == location_topology.Warehouse.id
             ).outerjoin(
                 location_topology.WarehouseBin, asset.Asset.bin_id == location_topology.WarehouseBin.id

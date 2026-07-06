@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Share2, Clock, CheckCircle2, XCircle, MessageSquare, ArrowRightLeft, Search, Package } from 'lucide-react';
 import { useTransferRequests, useApproveTransfer, useRejectTransfer, useTransferStats, useDispatchTransfer, useReceiveTransfer } from '../hooks/useTransfers';
+import { useDepartments } from '../hooks/useDepartments';
 import { cn } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import { Can } from '../components/auth/Can';
@@ -10,10 +11,12 @@ const Transfers = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected'>('pending');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
-  const { data, isLoading } = useTransferRequests(statusFilter, page, search);
+  const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
+  const { data: departments } = useDepartments();
+  const { data: requestsData, isLoading } = useTransferRequests(statusFilter, page, search, departmentId);
   const { data: stats } = useTransferStats();
-  const requests = (data as any)?.transfer_requests || [];
-  const pagination = (data as any)?.pagination;
+  const requests = (requestsData as any)?.transfer_requests || [];
+  const pagination = (requestsData as any)?.pagination;
   
   const queryClient = useQueryClient();
   const approveMutation = useApproveTransfer();
@@ -112,6 +115,16 @@ const Transfers = () => {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none"
           />
+        </div>
+        <div className="ml-3 hidden md:block">
+          <select
+            value={departmentId ?? ''}
+            onChange={(e) => { setDepartmentId(e.target.value ? Number(e.target.value) : undefined); setPage(1); }}
+            className="bg-white border border-slate-200 rounded-xl py-2 pl-3 pr-8 text-sm focus:ring-2 focus:ring-brand-primary/20 transition-all outline-none"
+          >
+            <option value="">All Departments</option>
+            {departments?.map((d:any) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
         </div>
       </div>
 

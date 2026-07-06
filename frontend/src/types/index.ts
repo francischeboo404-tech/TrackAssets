@@ -37,7 +37,7 @@ export interface InventoryItem {
   updated_at: string;
   // New procurement and traceability fields
   category_id?: number;
-  item_type?: 'consumable' | 'asset' | 'raw' | 'finished' | 'service';
+  item_type?: 'consumable' | 'asset' | 'raw' | 'finished' | 'service' | 'other';
   status?: string;
   preferred_supplier_id?: number;
   supplier_item_reference?: string;

@@ -16,8 +16,8 @@ class APIError(Exception):
         self.payload = payload
 
 
-class ValidationError(APIError):
-    """Validation error"""
+class ValidationError(APIError, ValueError):
+    """Validation error (also behaves like a ValueError for tests)."""
 
     def __init__(self, message, errors=None):
         super().__init__(message, 400, {"errors": errors or []})

@@ -81,7 +81,7 @@ def global_search():
         final_asset_conditions.append(Asset.assigned_to.in_(user_names))
 
     assets_query = (
-        Asset.query.outerjoin(Department)
+        Asset.query.outerjoin(Department, Asset.department_id == Department.id)
         .filter(
             Asset.organisation_id == org_id,
             Asset.status != "disposed",

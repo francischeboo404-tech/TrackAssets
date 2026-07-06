@@ -24,6 +24,7 @@ from app.validation import (
     validate_input,
 )
 from app.services.event_bus import event_bus
+from app.services.stock_service import StockService
 
 transfers_bp = Blueprint("transfers", __name__)
 
@@ -107,6 +108,34 @@ def request_transfer():
                 raise ValidationError("Invalid destination department")
             to_dept_id = validated_data["new_department_id"]
 
+        # Enforce department -> warehouse alignment and validate bin ownership
+        # If destination department is linked to a warehouse, ensure any provided to_warehouse_id matches
+        dest_dept_warehouse_id = getattr(new_dept, 'warehouse_id', None)
+        if dest_dept_warehouse_id:
+            # If the client supplied a conflicting warehouse, reject
+            if validated_data.get('to_warehouse_id') and validated_data.get('to_warehouse_id') != dest_dept_warehouse_id:
+                raise ValidationError('Destination department is linked to a different warehouse. Please select the correct warehouse.')
+            # Ensure the transfer request records the department's warehouse
+            validated_data['to_warehouse_id'] = dest_dept_warehouse_id
+
+        # If a bin was provided, ensure it belongs to the resolved destination warehouse
+        if validated_data.get('to_bin_id'):
+            from app.models.location_topology import WarehouseBin
+            bin_obj = WarehouseBin.query.get(validated_data.get('to_bin_id'))
+            if not bin_obj:
+                raise ValidationError('Invalid destination bin')
+            # Determine the bin's warehouse via relationships (shelf -> rack -> zone -> warehouse)
+            bin_warehouse = None
+            try:
+                bin_warehouse = getattr(bin_obj, 'shelf').rack.zone.warehouse
+            except Exception:
+                bin_warehouse = None
+            if not bin_warehouse:
+                raise ValidationError('Destination bin does not have an associated warehouse')
+            bin_wh_id = getattr(bin_warehouse, 'id', None)
+            if validated_data.get('to_warehouse_id') and bin_wh_id != validated_data.get('to_warehouse_id'):
+                raise ValidationError('Selected bin does not belong to the specified destination warehouse')
+
         transfer_request = transfer.TransferRequest(
             organisation_id=org_id,
             item_type="asset",
@@ -150,7 +179,8 @@ def request_transfer():
         if not validated_data.get("new_department_id"):
             raise ValidationError("new_department_id is required for inventory transfers")
 
-        from app.models.inventory import InventoryItem, WarehouseStock
+        from app.models.inventory import InventoryItem
+        from app.models.stock_levels import WarehouseStock
         inv_item = InventoryItem.query.filter_by(
             id=validated_data["inventory_item_id"], organisation_id=org_id
         ).first()
@@ -168,7 +198,46 @@ def request_transfer():
             if inv_item.quantity < quantity:
                 raise ValidationError("Insufficient global stock.")
 
-        from_dept_id = validated_data["new_department_id"]
+        from_department_id = validated_data.get("from_department_id")
+        if from_department_id:
+            from_department = organization.Department.query.filter_by(
+                id=from_department_id,
+                organisation_id=org_id,
+                is_active=True,
+            ).first()
+            if not from_department:
+                raise ValidationError("Invalid source department")
+
+        # Validate destination department and enforce warehouse/bin alignment for inventory transfers
+        dest_dept = organization.Department.query.filter_by(
+            id=validated_data["new_department_id"],
+            organisation_id=org_id,
+            is_active=True,
+        ).first()
+        if not dest_dept:
+            raise ValidationError("Invalid destination department")
+
+        dest_dept_warehouse_id = getattr(dest_dept, 'warehouse_id', None)
+        if dest_dept_warehouse_id:
+            if validated_data.get('to_warehouse_id') and validated_data.get('to_warehouse_id') != dest_dept_warehouse_id:
+                raise ValidationError('Destination department is linked to a different warehouse. Please select the correct warehouse.')
+            validated_data['to_warehouse_id'] = dest_dept_warehouse_id
+
+        if validated_data.get('to_bin_id'):
+            from app.models.location_topology import WarehouseBin
+            bin_obj = WarehouseBin.query.get(validated_data.get('to_bin_id'))
+            if not bin_obj:
+                raise ValidationError('Invalid destination bin')
+            bin_warehouse = None
+            try:
+                bin_warehouse = getattr(bin_obj, 'shelf').rack.zone.warehouse
+            except Exception:
+                bin_warehouse = None
+            if not bin_warehouse:
+                raise ValidationError('Destination bin does not have an associated warehouse')
+            bin_wh_id = getattr(bin_warehouse, 'id', None)
+            if validated_data.get('to_warehouse_id') and bin_wh_id != validated_data.get('to_warehouse_id'):
+                raise ValidationError('Selected bin does not belong to the specified destination warehouse')
 
         transfer_request = transfer.TransferRequest(
             organisation_id=org_id,
@@ -177,8 +246,9 @@ def request_transfer():
             inventory_item_id=inv_item.id,
             quantity=quantity,
             requested_by=g.user.id,
-            from_department_id=from_dept_id,
+            from_department_id=from_department_id,
             to_department_id=validated_data["new_department_id"],
+            from_warehouse_id=from_warehouse_id,
             requested_location=validated_data.get("new_location"),
             to_warehouse_id=validated_data.get("to_warehouse_id"),
             to_bin_id=validated_data.get("to_bin_id"),
@@ -194,7 +264,9 @@ def request_transfer():
                 "inventory_item_id": inv_item.id,
                 "item_name": inv_item.name,
                 "quantity": quantity,
+                "from_department": from_department_id,
                 "to_department": validated_data["new_department_id"],
+                "from_warehouse_id": from_warehouse_id,
                 "requested_by": g.user.username,
             },
             organisation_id=org_id,
@@ -309,6 +381,7 @@ def get_transfer_requests():
     search = request.args.get("search")
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 50, type=int)
+    department_id = request.args.get("department_id", type=int)
 
     from sqlalchemy.orm import joinedload
 
@@ -343,6 +416,15 @@ def get_transfer_requests():
                 InventoryItem.sku.ilike(f"%{search}%"),
                 organization.User.username.ilike(f"%{search}%"),
                 transfer.TransferRequest.comment.ilike(f"%{search}%")
+            )
+        )
+
+    # Optional department scoping: show requests where either origin or destination is the department
+    if department_id:
+        query = query.filter(
+            db.or_(
+                transfer.TransferRequest.from_department_id == department_id,
+                transfer.TransferRequest.to_department_id == department_id,
             )
         )
 
@@ -678,7 +760,7 @@ def dispatch_transfer_request(request_id):
         item_id = asset_obj.id
     else:
         # Inventory Transfer dispatch
-        from app.models.inventory import InventoryItem, WarehouseStock
+        from app.models.inventory import InventoryItem
         inv_item = (
             InventoryItem.query.with_for_update()
             .filter_by(id=transfer_req.inventory_item_id, organisation_id=org_id)
@@ -686,18 +768,11 @@ def dispatch_transfer_request(request_id):
         )
         if not inv_item:
             raise NotFoundError("Inventory item not found")
-            
-        # We don't deduct stock at dispatch? Actually, for inventory, we should deduct from source warehouse now if specified, or global.
-        # But wait, deducting at dispatch means the stock is "In transit". If it fails, it needs rollback. 
-        # For simplicity, we just change the request status to "in_transit" and deduct/add upon "receive". Or we deduct now and add later.
-        # Let's deduct now.
-        # wait, transferring inventory stock is complex to track "in transit" without a transit warehouse. Let's just deduct it now and we add it later on receive.
         
-        # Deduct stock
-        from_warehouse_id = transfer_req.asset_id # Wait, where did we store from_warehouse_id? It wasn't in TransferRequest. 
-        # To avoid schema changes, we can just deduct from global stock now, or just do the full stock transfer at the "Receive" stage.
-        # Let's do the full stock transfer at the "Receive" stage, so dispatch just marks it as in_transit.
-        old_location = "Source Warehouse"
+        # Mark dispatch status without deducting stock yet
+        # Stock deduction and warehouse transfer happens at receive time
+        # This keeps inventory recoverable if dispatch fails between dispatch and receive
+        old_location = f"In Transit to Warehouse {transfer_req.to_warehouse_id}"
         item_id = inv_item.id
 
     AuditService.log_action(
@@ -898,15 +973,33 @@ def receive_transfer_request(request_id):
         inventory_service = InventoryService(
             repository=InventoryRepository(), session=db.session
         )
-        inventory_service.update_stock(
-            inv_item.id,
-            org_id,
-            "IN",
-            transfer_req.quantity,
-            warehouse_id=transfer_req.to_warehouse_id,
-            reference=f"Transfer Request {transfer_req.id}",
-            notes="Received from transfer request",
-        )
+        
+        # Use warehouse-to-warehouse transfer if from_warehouse_id is specified
+        # This ensures atomic deduction from source and addition to destination
+        if transfer_req.from_warehouse_id and transfer_req.to_warehouse_id:
+            # If stock wasn't deducted at dispatch (shouldn't happen now), do the full transfer here
+            inventory_service.update_stock(
+                inv_item.id,
+                org_id,
+                "OUT",
+                transfer_req.quantity,
+                warehouse_id=transfer_req.from_warehouse_id,
+                destination_warehouse_id=transfer_req.to_warehouse_id,
+                reference=f"Transfer Request {transfer_req.id}",
+                notes="Received from transfer request",
+            )
+        elif transfer_req.to_warehouse_id:
+            # Only destination warehouse specified, just add stock
+            inventory_service.update_stock(
+                inv_item.id,
+                org_id,
+                "IN",
+                transfer_req.quantity,
+                warehouse_id=transfer_req.to_warehouse_id,
+                reference=f"Transfer Request {transfer_req.id}",
+                notes="Received from transfer request",
+            )
+        
         item_id = inv_item.id
 
     AuditService.log_action(
@@ -1021,3 +1114,83 @@ def reject_transfer_request(request_id):
         ),
         200,
     )
+
+
+# ============================================================================
+# HIERARCHY-AWARE WAREHOUSE TRANSFER ENDPOINT
+# ============================================================================
+
+@transfers_bp.route("/inventory/hierarchy-transfer", methods=["POST"])
+@jwt_required_with_user
+@require_role("admin", "staff", "store_manager")
+@limiter.limit("50 per minute")
+@transaction_retry(max_retries=3)
+def transfer_inventory_between_warehouses():
+    """
+    Transfer inventory items between warehouses with hierarchy validation.
+    
+    Enforces warehouse hierarchy rules:
+    - Main warehouse can transfer to any child directly
+    - Child can transfer to parent (main warehouse)
+    - Child cannot transfer directly to another child
+    
+    Request body:
+    {
+        "inventory_item_id": int,
+        "quantity": int,
+        "from_warehouse_id": int,
+        "to_warehouse_id": int,
+        "notes": str (optional)
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    org_id = get_current_organisation_id()
+    
+    # Validate required fields
+    item_id = data.get("inventory_item_id")
+    quantity = data.get("quantity")
+    from_warehouse_id = data.get("from_warehouse_id")
+    to_warehouse_id = data.get("to_warehouse_id")
+    notes = data.get("notes", "")
+    
+    if not item_id:
+        raise ValidationError("inventory_item_id is required")
+    if not quantity or quantity <= 0:
+        raise ValidationError("quantity must be greater than 0")
+    if not from_warehouse_id:
+        raise ValidationError("from_warehouse_id is required")
+    if not to_warehouse_id:
+        raise ValidationError("to_warehouse_id is required")
+    
+    from app.models.inventory import InventoryItem
+    
+    # Verify item exists and belongs to organization
+    item = InventoryItem.query.filter_by(id=item_id, organisation_id=org_id).first()
+    if not item:
+        raise NotFoundError("Inventory item not found")
+    
+    try:
+        # Use stock service to handle hierarchy-aware transfer
+        stock_service = StockService()
+        transfer_result = stock_service.transfer_with_hierarchy(
+            item_id=item_id,
+            org_id=org_id,
+            quantity=quantity,
+            from_warehouse_id=from_warehouse_id,
+            to_warehouse_id=to_warehouse_id,
+            user_id=g.user.id,
+            notes=notes,
+            commit=True
+        )
+        
+        return jsonify({
+            "message": "Inventory transferred successfully",
+            "transfer": transfer_result
+        }), 200
+        
+    except ValueError as e:
+        raise ValidationError(str(e))
+    except ConflictError as e:
+        return jsonify({"error": str(e)}), 409
+    except NotFoundError as e:
+        return jsonify({"error": str(e)}), 404

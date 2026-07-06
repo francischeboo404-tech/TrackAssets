@@ -6,6 +6,7 @@ from app.models.stock_levels import WarehouseStock
 from app.models.item_instance import ItemInstance
 from app.errors import ValidationError
 from app.services.inventory_service import InventoryService
+from app.services.stock_service import StockService
 from app.db_utils import transaction_retry
 from datetime import datetime, timezone
 
@@ -26,13 +27,14 @@ class RequisitionService:
         db.session.flush()
         
         for item_data in items_data:
+            item = db.session.get(InventoryItem, int(item_data['item_id']))
             req_item = RequisitionItem(
                 organization_id=org_id,
                 ris_id=ris.id,
                 item_id=item_data['item_id'],
                 quantity_requested=item_data['quantity'],
                 quantity_issued=item_data.get('quantity_issued', 0),
-                unit_cost=item_data.get('unit_cost'),
+                unit_cost=item_data.get('unit_cost') if item_data.get('unit_cost') is not None else (item.unit_price if item else 0),
                 warehouse_id=item_data.get('warehouse_id'),
                 bin_id=item_data.get('bin_id'),
             )
@@ -140,7 +142,7 @@ class RequisitionService:
                     "item_id": r_item.item_id,
                     "type": "IN",
                     "quantity": to_return,
-                    "warehouse_id": None,
+                    "warehouse_id": r_item.warehouse_id,
                     "reference": f"{ris.ris_number}-RETURN",
                     "notes": "Returned via Requisition",
                 }
@@ -258,7 +260,7 @@ class RequisitionService:
                     total_issued += to_issue
             else:
                 # Non-serialized: prefer warehouse-level availability if provided
-                available = int(item.quantity or 0)
+                available = StockService(session=db.session).get_current_quantity(item.id)
                 if warehouse_id:
                     wh = db.session.query(WarehouseStock).filter_by(item_id=item.id, warehouse_id=warehouse_id).first()
                     if wh:

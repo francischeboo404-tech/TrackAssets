@@ -14,13 +14,17 @@ class RestockService:
         if not item:
             return
 
-        # 1. Global Check (Legacy/Fallback)
-        if item.quantity <= item.reorder_level:
+        # 1. Global Check using warehouse-aggregated current quantity.
+        # This avoids relying on the legacy cached InventoryItem.quantity value.
+        from app.services.stock_service import StockService
+        stock_service = StockService(session=db.session)
+        current_qty = stock_service.get_current_quantity(item_id)
+        if current_qty <= item.reorder_level:
             RestockService._create_or_update_alert(
                 item.organisation_id,
                 item.id,
                 None,
-                item.quantity,
+                current_qty,
                 item.reorder_level,
                 "LOW",
             )

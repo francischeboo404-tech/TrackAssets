@@ -29,15 +29,21 @@ class ForecastingService:
     @staticmethod
     def predict_days_remaining(item_id):
         """Predict how many days until stock exhaustion based on velocity."""
+        from app.services.stock_service import StockService
+
         item = InventoryItem.query.get(item_id)
-        if not item or item.quantity <= 0:
+        if not item:
+            return 0
+
+        current_qty = StockService().get_current_quantity(item_id)
+        if current_qty <= 0:
             return 0
 
         velocity = ForecastingService.calculate_daily_velocity(item_id)
         if velocity <= 0:
             return 999  # Infinite stock at current velocity
 
-        return item.quantity / velocity
+        return current_qty / velocity
 
     @staticmethod
     def get_replenishment_recommendation(item_id, warehouse_id=None):

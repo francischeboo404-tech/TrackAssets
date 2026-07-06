@@ -65,6 +65,26 @@ const RolePermissionsPage: React.FC = () => {
     }
   };
 
+  const PRESET_PERMISSIONS = ['movements:issue', 'movements:return'];
+
+  const applyPresetsToRole = async (roleKey: string) => {
+    const prev = roles || {};
+    const existing = new Set(prev[roleKey] || []);
+    PRESET_PERMISSIONS.forEach(p => existing.add(p));
+    const newRoles = { ...prev, [roleKey]: Array.from(existing) };
+    setRoles(newRoles);
+
+    setSaving(true);
+    try {
+      await api.put('/auth/roles', { roles: newRoles, labels });
+      addToast('success', 'Saved', 'Movement permissions added and saved');
+    } catch (err: any) {
+      addToast('error', 'Save Failed', err.response?.data?.message || 'Failed to save role mappings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!hasPermission('users:view')) {
     return <div className="p-6">Not authorized</div>;
   }
@@ -85,6 +105,19 @@ const RolePermissionsPage: React.FC = () => {
         <div className="text-rose-600">{error}</div>
       ) : (
         <div className="space-y-4">
+          <div className="p-3 bg-slate-50 border rounded text-sm text-slate-700">
+            <div className="font-semibold">Common movement permissions</div>
+            <div className="text-xs mt-1">Quick-add permissions for movements (issue/return). Click to add to a role.</div>
+            <div className="mt-2 flex gap-2">
+              {PRESET_PERMISSIONS.map(p => (
+                <button key={p} onClick={() => {
+                  // If no roles selected, apply to all default roles
+                  // by default we won't auto-apply to all; user should click per-role
+                  addToast('info', 'Tip', `Use the \"Add Role\" button then click a role's Add button to insert '${p}'`);
+                }} className="px-2 py-1 bg-white border rounded text-xs">{p}</button>
+              ))}
+            </div>
+          </div>
           {Object.keys(roles).map(roleKey => (
             <div key={roleKey} className="p-4 border rounded-lg bg-white">
               <div className="flex items-center justify-between">
@@ -93,6 +126,7 @@ const RolePermissionsPage: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => handleRemoveRole(roleKey)} className="text-rose-500">Remove</button>
+                  <button onClick={() => applyPresetsToRole(roleKey)} className="text-sky-600" disabled={saving}>{saving ? 'Saving...' : 'Add movement perms'}</button>
                 </div>
               </div>
 

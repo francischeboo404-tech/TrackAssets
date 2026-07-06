@@ -1,11 +1,46 @@
 from sqlalchemy import func
 from app import db
 from app.models import InventoryItem, StockMovement
+from app.services.stock_service import StockService
 from datetime import datetime, timedelta
 
 
 class AnalyticsService:
     """Service for computing enterprise-grade analytics and KPIs."""
+
+    @staticmethod
+    def _get_org_warehouse_total(org_id):
+        """Return the total stock quantity from WarehouseStock for the org."""
+        from app.models.stock_levels import WarehouseStock
+
+        return (
+            db.session.query(func.coalesce(func.sum(WarehouseStock.quantity_on_hand), 0))
+            .join(InventoryItem, WarehouseStock.item_id == InventoryItem.id)
+            .filter(
+                InventoryItem.organisation_id == org_id,
+                InventoryItem.is_active == True,
+            )
+            .scalar()
+            or 0
+        )
+
+    @staticmethod
+    def _get_legacy_item_total(org_id):
+        """Return quantity for legacy items without any WarehouseStock rows."""
+        from app.models.stock_levels import WarehouseStock
+
+        return (
+            db.session.query(func.coalesce(func.sum(InventoryItem.quantity), 0))
+            .filter(
+                InventoryItem.organisation_id == org_id,
+                InventoryItem.is_active == True,
+                ~InventoryItem.id.in_(
+                    db.session.query(WarehouseStock.item_id).distinct()
+                ),
+            )
+            .scalar()
+            or 0
+        )
 
     @staticmethod
     def get_inventory_summary(org_id, warehouse_id=None):
@@ -15,14 +50,19 @@ class AnalyticsService:
         from app.models.stock_levels import WarehouseStock
 
         if warehouse_id:
-            total_items = db.session.query(func.sum(WarehouseStock.quantity_on_hand)).filter(
-                WarehouseStock.warehouse_id == warehouse_id
-            ).scalar() or 0
+            total_items = (
+                db.session.query(func.coalesce(func.sum(WarehouseStock.quantity_on_hand), 0))
+                .join(InventoryItem, WarehouseStock.item_id == InventoryItem.id)
+                .filter(
+                    WarehouseStock.warehouse_id == warehouse_id,
+                    InventoryItem.organisation_id == org_id,
+                    InventoryItem.is_active == True,
+                )
+                .scalar()
+                or 0
+            )
         else:
-            total_items = db.session.query(func.sum(InventoryItem.quantity)).filter(
-                InventoryItem.organisation_id == org_id,
-                InventoryItem.is_active == True
-            ).scalar() or 0
+            total_items = AnalyticsService._get_org_warehouse_total(org_id) + AnalyticsService._get_legacy_item_total(org_id)
 
         # Consolidate into a single aggregation query
         alert_query = db.session.query(
@@ -164,29 +204,45 @@ class AnalyticsService:
         if warehouse_id:
             value = (
                 db.session.query(
-                    func.sum(WarehouseStock.quantity_on_hand * InventoryItem.unit_price)
+                    func.coalesce(func.sum(WarehouseStock.quantity_on_hand * InventoryItem.unit_price), 0)
                 )
-                .join(WarehouseStock)
+                .join(InventoryItem, WarehouseStock.item_id == InventoryItem.id)
                 .filter(
                     InventoryItem.organisation_id == org_id,
                     InventoryItem.is_active == True,
-                    WarehouseStock.warehouse_id == warehouse_id
+                    WarehouseStock.warehouse_id == warehouse_id,
                 )
                 .scalar()
                 or 0
             )
         else:
-            value = (
+            warehouse_value = (
                 db.session.query(
-                    func.sum(InventoryItem.quantity * InventoryItem.unit_price)
+                    func.coalesce(func.sum(WarehouseStock.quantity_on_hand * InventoryItem.unit_price), 0)
                 )
+                .join(InventoryItem, WarehouseStock.item_id == InventoryItem.id)
                 .filter(
                     InventoryItem.organisation_id == org_id,
-                    InventoryItem.is_active == True
+                    InventoryItem.is_active == True,
                 )
                 .scalar()
                 or 0
             )
+            legacy_value = (
+                db.session.query(
+                    func.coalesce(func.sum(InventoryItem.quantity * InventoryItem.unit_price), 0)
+                )
+                .filter(
+                    InventoryItem.organisation_id == org_id,
+                    InventoryItem.is_active == True,
+                    ~InventoryItem.id.in_(
+                        db.session.query(WarehouseStock.item_id).distinct()
+                    ),
+                )
+                .scalar()
+                or 0
+            )
+            value = warehouse_value + legacy_value
 
         return round(value, 2)
 

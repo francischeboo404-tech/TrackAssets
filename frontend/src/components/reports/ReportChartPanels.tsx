@@ -44,7 +44,7 @@ const ChartShell = ({
         {subtitle}
       </p>
     )}
-    <div className="mt-4 h-72">{children}</div>
+    <div className="mt-4 h-72 min-h-[180px] min-w-0" style={{ minWidth: 0 }}>{children}</div>
   </div>
 );
 

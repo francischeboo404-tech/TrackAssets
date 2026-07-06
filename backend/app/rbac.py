@@ -68,6 +68,7 @@ def assert_not_read_only(role: str, action: str = "perform this action"):
 
 def can_transition_status(role: str, from_status: str, to_status: str) -> bool:
     """Return True if role may perform the status transition."""
+    role = normalize_role(role)
     if is_privileged(role):
         return True
     if is_read_only_role(role):
@@ -124,6 +125,7 @@ def get_available_transitions(role: str, current_status: str) -> list[dict]:
 
 def filter_analytics_payload(role: str, payload: dict) -> dict:
     """Scope analytics response by role (defense in depth with route guards)."""
+    role = normalize_role(role)
     if is_privileged(role) or role == "store_manager":
         return payload
 
@@ -288,6 +290,8 @@ ROLE_PERMISSIONS = {
         "analytics:view",
         "users:view",
         "reports:view",
+        "movements:issue",
+        "movements:return",
     ],
     "logistics_officer": [
         "assets:view",
@@ -301,6 +305,8 @@ ROLE_PERMISSIONS = {
         "warehouses:view",
         "disposal:create",
         "variance:create",
+        "movements:issue",
+        "movements:return",
     ],
     "procurement_officer": [
         "assets:view",

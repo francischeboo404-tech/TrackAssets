@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload, UserPlus, UserCheck, CornerDownLeft } from 'lucide-react';
 import { useAssets } from '../hooks/useAssets';
+import { useDepartments } from '../hooks/useDepartments';
 import { AssetLifecycleActions } from '../components/ui/AssetLifecycleActions';
 import { canCreateAsset, canEditAsset, canRequestTransfer, canAssignAsset, canReturnAsset } from '../lib/permissions';
 import { cn } from '../lib/utils';
@@ -29,6 +30,7 @@ const Assets = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<any>(null);
@@ -45,12 +47,15 @@ const Assets = () => {
   const { data, isLoading } = useAssets({ 
     search: search || undefined, 
     status: statusFilter || undefined,
-    page 
+    page,
+    department_id: departmentId,
   });
   
   const assets = (data as any)?.assets || [];
   const pagination = (data as any)?.pagination;
   const { user } = useAuth();
+
+  const { data: departments } = useDepartments();
 
   const handleEdit = (asset: any) => {
     setSelectedAsset(asset);
@@ -122,6 +127,18 @@ const Assets = () => {
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-white border border-transparent rounded-xl py-2.5 pl-11 pr-4 text-sm focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/20 transition-all duration-300 outline-none shadow-sm placeholder:text-slate-400"
           />
+        </div>
+        <div className="ml-3 hidden sm:block">
+          <select
+            value={departmentId ?? ''}
+            onChange={(e) => setDepartmentId(e.target.value ? Number(e.target.value) : undefined)}
+            className="bg-white border border-slate-200/60 rounded-xl py-2 pl-3 pr-8 text-sm focus:ring-4 focus:ring-brand-primary/10 focus:border-brand-primary/20 transition-all duration-300 outline-none shadow-sm"
+          >
+            <option value="">All Departments</option>
+            {departments?.map((d: any) => (
+              <option key={d.id} value={d.id}>{d.name}</option>
+            ))}
+          </select>
         </div>
         <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 hide-scrollbar px-2">
           <button 

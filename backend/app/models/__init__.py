@@ -16,6 +16,7 @@ from app.models.inventory import (
 )
 from app.models.user import User
 from app.models.organization import Organization, Department
+from app.models.organization import Employee, ItemIssue, ItemReturn
 from app.models.location_topology import (
 	Warehouse,
 	WarehouseZone,
@@ -40,6 +41,9 @@ __all__ = [
 	"User",
 	"Organization",
 	"Department",
+	"Employee",
+	"ItemIssue",
+	"ItemReturn",
 	"Warehouse",
 	"WarehouseZone",
 	"WarehouseRack",

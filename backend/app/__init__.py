@@ -35,6 +35,15 @@ def create_app(config_name=None):
     from config import config_by_name
 
     app.config.from_object(config_by_name[config_name])
+    
+    # Validate production JWT secret meets minimum length requirement
+    if config_name == "production":
+        from config import _get_production_jwt_secret
+        try:
+            app.config["JWT_SECRET_KEY"] = _get_production_jwt_secret()
+            app.config["SECRET_KEY"] = _get_production_jwt_secret()  # Reuse same validation
+        except ValueError as e:
+            raise RuntimeError(f"Production configuration error: {str(e)}")
 
     # Provide a safe fallback DB URI when running in environments where a
     # production DATABASE_URL is not set (tests and quick local checks).
@@ -145,6 +154,8 @@ def create_app(config_name=None):
         requisition_bp = _import_bp("requisition")
         disposal_bp = _import_bp("disposal")
         ledger_bp = _import_bp("ledger")
+        employees_bp = _import_bp("employees")
+        movements_bp = _import_bp("item_movements")
 
         app.register_blueprint(users_bp, url_prefix="/api/users")
 
@@ -169,6 +180,8 @@ def create_app(config_name=None):
         app.register_blueprint(requisition_bp, url_prefix="/api/requisition")
         app.register_blueprint(disposal_bp, url_prefix="/api/disposal")
         app.register_blueprint(ledger_bp, url_prefix="/api/ledger")
+        app.register_blueprint(employees_bp, url_prefix="/api/employees")
+        app.register_blueprint(movements_bp, url_prefix="/api/movements")
         @app.route("/static/uploads/logos/<path:filename>")
         def serve_org_logo(filename):
             """Serve organization logo uploads."""

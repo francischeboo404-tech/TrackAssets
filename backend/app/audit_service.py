@@ -1,3 +1,7 @@
+from decimal import Decimal
+from datetime import date, datetime
+from uuid import UUID
+
 from flask import g, request
 
 from app import db
@@ -15,6 +19,25 @@ class AuditService:
     """
 
     @staticmethod
+    def _sanitize_for_json(value):
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Decimal):
+            return float(value)
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, (list, tuple, set)):
+            return [AuditService._sanitize_for_json(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                str(key): AuditService._sanitize_for_json(item)
+                for key, item in value.items()
+            }
+        return str(value)
+
+    @staticmethod
     def log_action(
         action,
         entity_type,
@@ -22,6 +45,7 @@ class AuditService:
         details=None,
         user_id=None,
         organisation_id=None,
+        module=None,
         session=None,
         commit=False,
     ):
@@ -50,16 +74,32 @@ class AuditService:
                 ip_address = request.remote_addr
             except RuntimeError:
                 ip_address = None
+            # Get User-Agent when in request context
+            try:
+                user_agent = request.headers.get("User-Agent")
+            except Exception:
+                user_agent = None
 
             user_role = None
             if hasattr(g, "user") and g.user is not None:
                 user_role = getattr(g.user, "role", None)
 
-            enriched_details = dict(details) if isinstance(details, dict) else {}
+            enriched_details = (
+                {
+                    key: AuditService._sanitize_for_json(value)
+                    for key, value in details.items()
+                }
+                if isinstance(details, dict)
+                else {}
+            )
             if details is not None and not isinstance(details, dict):
-                enriched_details = {"payload": details}
+                enriched_details = {
+                    "payload": AuditService._sanitize_for_json(details)
+                }
             if user_role:
                 enriched_details["role"] = user_role
+            if user_agent:
+                enriched_details["user_agent"] = user_agent
             if "previous_state" not in enriched_details and enriched_details.get(
                 "old_values"
             ):
@@ -75,6 +115,8 @@ class AuditService:
                 action=action,
                 entity_type=entity_type,
                 entity_id=entity_id,
+                reference=details.get("reference") if isinstance(details, dict) else None,
+                module=module,
                 details=enriched_details or None,
                 ip_address=ip_address,
             )
@@ -90,9 +132,22 @@ class AuditService:
 
     @staticmethod
     def log_asset_change(
-        asset, action, old_values=None, new_values=None, session=None
+        asset, action, old_values=None, new_values=None, module=None, session=None
     ):
         """Log asset-specific changes"""
+        from app.models.asset import AssetAuditLog
+        
+        sess = session or db.session
+        
+        log_entry = AssetAuditLog(
+            asset_id=asset.id,
+            action=action,
+            old_values=old_values,
+            new_values=new_values,
+        )
+        sess.add(log_entry)
+        
+        # Also log to generic AuditLog for organization-level audit trail
         details = {}
         if old_values:
             details["old_values"] = old_values
@@ -102,15 +157,16 @@ class AuditService:
         AuditService.log_action(
             action=action,
             entity_type="asset",
-            entity_id=getattr(asset, "id", None),
+            entity_id=asset.id,
             details=details or None,
             organisation_id=getattr(asset, "organisation_id", None),
+            module=module,
             session=session,
         )
 
     @staticmethod
     def log_inventory_change(
-        item, action, quantity_change=None, reference=None, session=None
+        item, action, quantity_change=None, reference=None, module=None, session=None
     ):
         """Log inventory-specific changes"""
         details = {}
@@ -125,6 +181,7 @@ class AuditService:
             entity_id=getattr(item, "id", None),
             details=details or None,
             organisation_id=getattr(item, "organisation_id", None),
+            module=module,
             session=session,
         )
 

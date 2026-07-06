@@ -33,8 +33,17 @@ def report_assets():
     assert_can_access_report(g.user.role, "assets")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
+    # allow admins to request a specific department by id
+    dept_id = request.args.get("department_id", type=int)
+    department_name = _department_scope()
+    if dept_id and g.user.role == 'admin':
+        from app.models.organization import Department
+        dept = Department.query.filter_by(id=dept_id, organisation_id=org_id, is_active=True).first()
+        if dept:
+            department_name = dept.name
+
     data = ReportAnalyticsService.get_assets_report(
-        org_id, days=days, department_name=_department_scope()
+        org_id, days=days, department_name=department_name
     )
     data = filter_report_payload(g.user.role, "assets", data)
     return _report_json(data)
@@ -47,7 +56,8 @@ def report_inventory():
     assert_can_access_report(g.user.role, "inventory")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
-    data = ReportAnalyticsService.get_inventory_report(org_id, days=days)
+    dept_id = request.args.get("department_id", type=int)
+    data = ReportAnalyticsService.get_inventory_report(org_id, days=days, department_id=dept_id)
     data = filter_report_payload(g.user.role, "inventory", data)
     return _report_json(data)
 
@@ -59,7 +69,8 @@ def report_tracking():
     assert_can_access_report(g.user.role, "tracking")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
-    data = ReportAnalyticsService.get_tracking_report(org_id, days=days)
+    dept_id = request.args.get("department_id", type=int)
+    data = ReportAnalyticsService.get_tracking_report(org_id, days=days, department_id=dept_id)
     data = filter_report_payload(g.user.role, "tracking", data)
     return _report_json(data)
 
@@ -71,8 +82,16 @@ def report_dashboard():
     assert_can_access_report(g.user.role, "dashboard")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
+    dept_id = request.args.get("department_id", type=int)
+    department_name = _department_scope()
+    if dept_id and g.user.role == 'admin':
+        from app.models.organization import Department
+        dept = Department.query.filter_by(id=dept_id, organisation_id=org_id, is_active=True).first()
+        if dept:
+            department_name = dept.name
+
     data = ReportAnalyticsService.get_dashboard_report(
-        org_id, days=days, department_name=_department_scope()
+        org_id, days=days, department_name=department_name
     )
     data = filter_report_payload(g.user.role, "dashboard", data)
     return _report_json(data)

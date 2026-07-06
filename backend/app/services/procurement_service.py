@@ -50,6 +50,7 @@ class ProcurementService:
                 details={"pr_number": pr.pr_number, "items_count": len(items_data)},
                 user_id=requester_id,
                 organisation_id=org_id,
+                module="procurement",
                 session=db.session,
             )
         except Exception:
@@ -81,6 +82,7 @@ class ProcurementService:
             details={"pr_number": pr.pr_number},
             user_id=department_head_id,
             organisation_id=pr.organization_id,
+            module="procurement",
             session=db.session,
         )
         return pr
@@ -147,7 +149,7 @@ class ProcurementService:
         return pr
 
     @staticmethod
-    def create_purchase_order(org_id, supplier_id, items_data, pr_id=None, ris_id=None):
+    def create_purchase_order(org_id, pr_id=None, supplier_id=None, items_data=None, ris_id=None):
         if not pr_id and not ris_id:
             raise ValidationError("Either PR or Requisition must be provided to create a PO")
 
@@ -269,6 +271,7 @@ class ProcurementService:
             details={"po_number": po.po_number, "pr_id": pr_id, "supplier_id": supplier_id},
             user_id=None,
             organisation_id=org_id,
+            module="procurement",
             session=db.session,
         )
 
@@ -325,6 +328,7 @@ class ProcurementService:
             details={"po_number": po.po_number, "quotes_count": quotes_count if 'quotes_count' in locals() else 0},
             user_id=user_id,
             organisation_id=po.organization_id,
+            module="procurement",
             session=db.session,
         )
         return po

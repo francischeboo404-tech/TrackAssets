@@ -166,6 +166,13 @@ def create_department():
     ).first():
         raise ConflictError("Department code already exists")
 
+    # Validate warehouse exists and belongs to organisation
+    warehouse_id = validated_data.get("warehouse_id")
+    from app.models.location_topology import Warehouse
+    warehouse = Warehouse.query.filter_by(id=warehouse_id, organisation_id=org_id, is_active=True).first()
+    if not warehouse:
+        raise ValidationError("Invalid or missing warehouse_id")
+
     allowed_category_ids = validated_data.get("allowed_category_ids") or []
     if allowed_category_ids:
         valid_categories = Category.query.filter(
@@ -194,6 +201,7 @@ def create_department():
         code=validated_data["code"],
         description=validated_data.get("description"),
         head_id=head_id,
+        warehouse_id=warehouse_id,
         allowed_category_ids=validated_data.get("allowed_category_ids") or [],
         allowed_inventory_item_types=validated_data.get("allowed_inventory_item_types") or [],
         allowed_asset_types=validated_data.get("allowed_asset_types") or [],
@@ -277,6 +285,7 @@ def update_department(dept_id):
         "allowed_category_ids",
         "allowed_inventory_item_types",
         "allowed_asset_types",
+        "warehouse_id",
     ]
 
     for field in updatable_fields:

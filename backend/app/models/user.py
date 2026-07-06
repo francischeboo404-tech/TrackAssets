@@ -102,6 +102,8 @@ class User(UserMixin, db.Model):
                 "analytics:view",
                 "users:view",
                 "reports:view",
+                "movements:issue",
+                "movements:return",
             ],
             "logistics_officer": [
                 "assets:view",
@@ -113,6 +115,8 @@ class User(UserMixin, db.Model):
                 "transfers:create",
                 "transfers:view",
                 "warehouses:view",
+                "movements:issue",
+                "movements:return",
             ],
             "procurement_officer": [
                 "assets:view",
@@ -137,6 +141,8 @@ class User(UserMixin, db.Model):
                 "transfers:create",
                 "transfers:view",
                 "warehouses:view",
+                "movements:issue",
+                "movements:return",
             ],
             "dept_head": [
                 "assets:view",
@@ -146,6 +152,8 @@ class User(UserMixin, db.Model):
                 "transfers:create",
                 "transfers:view",
                 "reports:view",
+                "movements:issue",
+                "movements:return",
             ],
             "viewer": [
                 "assets:view", "inventory:view", "warehouses:view", "reports:view"

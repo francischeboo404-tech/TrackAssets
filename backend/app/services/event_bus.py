@@ -47,51 +47,69 @@ class EventBus:
             self._notify_subscribers({"type": event_type, "data": data, "timestamp": datetime.utcnow().isoformat()})
 
     def stream(self, organisation_id=None):
-        """Streaming generator that polls for events. SSE compatible."""
-        # Initial offset
-        last_check = datetime.utcnow()
+        """Streaming generator that polls for events. SSE compatible.
+
+        Uses a fresh SQLAlchemy session per poll cycle so it does not
+        hold the request-level session open across the entire stream lifetime.
+        """
+        from flask import current_app
+        from sqlalchemy.orm import scoped_session, sessionmaker
+
         last_id = 0
+        last_check = datetime.utcnow() - timedelta(seconds=5)
+
+        # Send an immediate heartbeat so the browser knows the connection is alive
+        yield ": heartbeat\n\n"
 
         while True:
-            # Re-scoping session to get fresh data
             try:
-                db.session.expire_all()
-            except Exception:
-                pass
-
-            # Polling logic: fetch events newer than last check
-            query = SystemEvent.query.filter(
-                SystemEvent.created_at >= last_check - timedelta(seconds=5)
-            )
-
-            if organisation_id:
-                query = query.filter(
-                    (SystemEvent.organisation_id == organisation_id)
-                    | (SystemEvent.organisation_id == None)
+                # Create a fresh, short-lived session for each poll
+                SessionFactory = scoped_session(
+                    sessionmaker(bind=db.engine, expire_on_commit=False)
                 )
+                poll_session = SessionFactory()
 
-            if last_id > 0:
-                query = query.filter(SystemEvent.id > last_id)
-
-            try:
-                events = query.order_by(SystemEvent.id.asc()).limit(50).all()
-            except Exception:
-                # If DB query fails, yield a heartbeat comment to keep connection alive
-                yield ": heartbeat\n\n"
-                time.sleep(1)
-                continue
-
-            for event in events:
                 try:
-                    yield f"data: {json.dumps(event.to_dict())}\n\n"
-                except Exception:
-                    # Fallback payload if serialization fails
-                    yield f"data: {json.dumps({'id': getattr(event,'id',None),'type': getattr(event,'event_type',None),'data': getattr(event,'data',None)})}\n\n"
-                last_id = event.id
-                last_check = event.created_at
+                    query = poll_session.query(SystemEvent).filter(
+                        SystemEvent.created_at >= last_check
+                    )
+                    if organisation_id:
+                        query = query.filter(
+                            (SystemEvent.organisation_id == organisation_id)
+                            | (SystemEvent.organisation_id.is_(None))
+                        )
+                    if last_id > 0:
+                        query = query.filter(SystemEvent.id > last_id)
 
-            # Sleep to prevent high DB load
-            time.sleep(1)
+                    events = query.order_by(SystemEvent.id.asc()).limit(50).all()
+
+                    for event in events:
+                        try:
+                            payload = {
+                                "id": event.id,
+                                "type": event.event_type,
+                                "data": event.data,
+                                "organisation_id": event.organisation_id,
+                                "timestamp": event.created_at.isoformat() if event.created_at else None,
+                            }
+                            yield f"data: {json.dumps(payload)}\n\n"
+                        except Exception:
+                            pass
+                        last_id = event.id
+                        last_check = event.created_at
+
+                finally:
+                    poll_session.close()
+                    SessionFactory.remove()
+
+            except GeneratorExit:
+                # Client disconnected — stop streaming cleanly
+                return
+            except Exception:
+                # Any DB error → send heartbeat to keep connection alive
+                yield ": heartbeat\n\n"
+
+            time.sleep(2)
 
 
 # Global singleton

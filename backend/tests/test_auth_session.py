@@ -30,6 +30,11 @@ class TestAuthSession(unittest.TestCase):
         db.drop_all()
         self.ctx.pop()
 
+    def test_development_config_uses_fallback_secret(self):
+        app = create_app("development")
+        self.assertEqual(app.config["SECRET_KEY"], "dev-secret-key")
+        self.assertEqual(app.config["JWT_SECRET_KEY"], "dev-secret-key")
+
     def test_register_org_normalizes_hyphenated_org_code(self):
         resp = self.client.post(
             "/api/auth/register-org",
