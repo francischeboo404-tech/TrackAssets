@@ -7,6 +7,7 @@ export interface Department {
   name: string;
   code: string;
   description: string;
+  warehouse_id?: number | null;
   head?: {
     id: number;
     username: string;
