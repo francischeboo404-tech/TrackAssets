@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal } from './Modal';
-import { ArrowRightLeft, MapPin, MessageSquare, Building2, Loader2 } from 'lucide-react';
+import { ArrowRightLeft, MapPin, MessageSquare, Building2, Loader2, AlertCircle } from 'lucide-react';
 import { useRequestTransfer } from '../../hooks/useTransfers';
 import { useWarehouses, useWarehouseDetails } from '../../hooks/useWarehouses';
 import { useDepartments } from '../../hooks/useDepartments';
@@ -16,6 +16,7 @@ interface TransferRequestModalProps {
 
 export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOpen, onClose, asset, inventoryItem, itemType = 'asset' }) => {
   const [newDepartmentId, setNewDepartmentId] = useState('');
+  const [fromDepartmentId, setFromDepartmentId] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [toWarehouseId, setToWarehouseId] = useState('');
   const [toBinId, setToBinId] = useState('');
@@ -28,6 +29,31 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
   const { mutate: requestTransfer, isPending } = useRequestTransfer();
   const { addToast } = useToast();
 
+  const currentDepartmentId = asset?.department_id;
+  const selectedDestinationDepartment = useMemo(
+    () => departments?.find((dept: any) => dept.id === Number(newDepartmentId)),
+    [departments, newDepartmentId],
+  );
+  const destinationDepartmentWarehouseId = selectedDestinationDepartment?.warehouse_id;
+  const [warehouseMessage, setWarehouseMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!destinationDepartmentWarehouseId) {
+      setWarehouseMessage(null);
+      return;
+    }
+
+    if (toWarehouseId && Number(toWarehouseId) !== destinationDepartmentWarehouseId) {
+      setWarehouseMessage(
+        'Selected destination department is linked to a different warehouse. Leave warehouse empty to use the department warehouse or choose the correct warehouse.'
+      );
+    } else {
+      setWarehouseMessage(
+        `Destination department is linked to warehouse ${destinationDepartmentWarehouseId}. This warehouse will be used for the transfer.`
+      );
+    }
+  }, [destinationDepartmentWarehouseId, toWarehouseId]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDepartmentId) return;
@@ -35,12 +61,24 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
     const payload: any = {
       transfer_type: 'department_to_department',
       new_department_id: Number(newDepartmentId),
+      from_department_id: fromDepartmentId ? Number(fromDepartmentId) : undefined,
       new_location: newLocation,
       comment,
       to_warehouse_id: toWarehouseId ? Number(toWarehouseId) : undefined,
       to_bin_id: toBinId ? Number(toBinId) : undefined,
-      item_type: itemType
+      item_type: itemType,
     };
+
+    // If destination department is linked to a warehouse, enforce alignment on client side
+    if (destinationDepartmentWarehouseId) {
+      // if user somehow selected a different warehouse, treat as validation error
+      if (toWarehouseId && Number(toWarehouseId) !== destinationDepartmentWarehouseId) {
+        addToast('error', 'Validation Error', 'Selected destination department is linked to a different warehouse. Leave warehouse empty to use the department warehouse or choose the correct warehouse.');
+        return;
+      }
+      // ensure payload includes the department's warehouse id so server can validate/record it
+      payload.to_warehouse_id = destinationDepartmentWarehouseId;
+    }
 
     if (itemType === 'asset' && asset) {
       payload.asset_id = asset.id;
@@ -59,6 +97,7 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
           addToast('success', 'Transfer Requested', `Movement request for ${itemName} has been submitted.`);
           onClose();
           setNewDepartmentId('');
+          setFromDepartmentId('');
           setNewLocation('');
           setToWarehouseId('');
           setToBinId('');
@@ -75,7 +114,7 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
   if (!asset && !inventoryItem) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Request Asset Transfer">
+    <Modal isOpen={isOpen} onClose={onClose} title={itemType === 'inventory' ? 'Request Inventory Transfer' : 'Request Asset Transfer'}>
       <form onSubmit={handleSubmit} className="space-y-6">
         
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
@@ -118,32 +157,71 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
         )}
 
         <div className="space-y-4">
+          {itemType === 'inventory' && (
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Source Department (Optional)</label>
+              <div className="relative">
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <select
+                  value={fromDepartmentId}
+                  onChange={(e) => setFromDepartmentId(e.target.value)}
+                  className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
+                >
+                  <option value="">Select Source Department...</option>
+                  {departments?.map((dept: any) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name} ({dept.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Department</label>
+            <label htmlFor="destination-department-select" className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Department</label>
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <select
+                id="destination-department-select"
                 required
                 value={newDepartmentId}
                 onChange={(e) => setNewDepartmentId(e.target.value)}
                 className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
               >
                 <option value="">Select Department...</option>
-                {departments?.filter((d: any) => d.id !== asset.department_id).map((dept: any) => (
-                  <option key={dept.id} value={dept.id}>{dept.name} ({dept.code})</option>
-                ))}
+                {departments
+                  ?.filter((d: any) => currentDepartmentId ? d.id !== currentDepartmentId : true)
+                  .map((dept: any) => (
+                    <option key={dept.id} value={dept.id}>
+                      {dept.name} ({dept.code})
+                    </option>
+                  ))}
               </select>
             </div>
           </div>
-          
+
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Warehouse (Optional)</label>
+            <label htmlFor="destination-warehouse-select" className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Warehouse (Optional)</label>
+            {warehouseMessage && (
+              <div
+                aria-live="polite"
+                className={`mb-3 rounded-xl border px-3 py-2.5 text-sm ${warehouseMessage.includes('different') ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-slate-50 text-slate-600'}`}
+              >
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{warehouseMessage}</p>
+                </div>
+              </div>
+            )}
             <div className="relative">
               <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <select
+                id="destination-warehouse-select"
                 value={toWarehouseId}
+                disabled={Boolean(destinationDepartmentWarehouseId)}
                 onChange={(e) => { setToWarehouseId(e.target.value); setToBinId(''); }}
-                className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
+                className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none disabled:opacity-70"
               >
                 <option value="">Select Warehouse...</option>
                 {warehouses?.map((wh: any) => (
@@ -151,13 +229,19 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
                 ))}
               </select>
             </div>
+            {warehouseMessage && (
+              <p className={`mt-2 text-xs ${warehouseMessage.includes('different') ? 'text-rose-600' : 'text-slate-500'}`}>
+                {warehouseMessage}
+              </p>
+            )}
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Bin (Optional)</label>
+            <label htmlFor="destination-bin-select" className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Destination Bin (Optional)</label>
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <select
+                id="destination-bin-select"
                 value={toBinId}
                 onChange={(e) => setToBinId(e.target.value)}
                 disabled={!toWarehouseId}
@@ -169,6 +253,11 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
                 ))}
               </select>
             </div>
+            {destinationDepartmentWarehouseId && (
+              <p className="mt-2 text-xs text-slate-500">
+                Destination department is linked to warehouse {destinationDepartmentWarehouseId}. Bin selection is restricted to that warehouse.
+              </p>
+            )}
           </div>
 
           <div>
