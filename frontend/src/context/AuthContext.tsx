@@ -6,7 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import api, { clearAuthTokens } from "../services/api";
-import { hasStoredSession } from "../lib/authStorage";
+import { hasStoredSession, setAuthTokens } from "../lib/authStorage";
 import { roleHasPermission } from "../lib/rbac";
 
 interface User {
@@ -19,7 +19,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (token: string, userData: User) => void;
+  login: (token: string, userData: User, refreshToken?: string | null) => void;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
 }
@@ -131,9 +131,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [user],
   );
 
-  const login = (_token: string, userData: User) => {
-    setUser(userData);
-  };
+  const login = useCallback(
+    (token: string, userData: User, refreshToken?: string | null) => {
+      setUser(userData);
+      setAuthTokens(token || null, refreshToken ?? null);
+    },
+    [],
+  );
 
   const logout = async () => {
     try {
