@@ -22,7 +22,7 @@ def client(app):
 
 def test_sse_stream_with_query_token(app, client):
     # Create org
-    org = Organization(name="SSE Org", code="SSE", description="SSE test org")
+    org = Organization(name=" ", code=" ", description=" ")
     db.session.add(org)
     db.session.commit()
 
@@ -30,18 +30,18 @@ def test_sse_stream_with_query_token(app, client):
     with public_schema():
         u = user_model.User(
             organisation_id=org.id,
-            username="sse_admin",
-            email="sse_admin@example.com",
-            first_name="SSE",
-            last_name="Admin",
-            role="admin",
+            username=" ",
+            email=" ",
+            first_name=" ",
+            last_name=" ",
+            role=" ",
         )
-        u.set_password("Admin123!")
+        u.set_password(" ")
         db.session.add(u)
         db.session.commit()
 
     # Login to obtain access_token
-    login_resp = client.post("/api/auth/login", json={"email": "sse_admin@example.com", "password": "Admin123!"})
+    login_resp = client.post("/api/auth/login", json={"email": " ", "password": " "})
     assert login_resp.status_code == 200
     token = login_resp.get_json().get("access_token")
     assert token

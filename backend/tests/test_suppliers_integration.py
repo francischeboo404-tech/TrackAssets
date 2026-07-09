@@ -23,7 +23,7 @@ def client(app):
 
 def test_supplier_crud_flow(app, client):
     # Create org
-    org = Organization(name="Suppliers Org", code="SUP-ORG")
+    org = Organization(name=" ", code=" ")
     db.session.add(org)
     db.session.commit()
 
@@ -31,13 +31,13 @@ def test_supplier_crud_flow(app, client):
     with public_schema():
         u = user_model.User(
             organisation_id=org.id,
-            username="sup_admin",
-            email="sup_admin@example.com",
-            first_name="Sup",
-            last_name="Admin",
-            role="admin",
+            username=" ",
+            email=" ",
+            first_name=" ",
+            last_name=" ",
+            role=" ",
         )
-        u.set_password("Admin123!")
+        u.set_password(" ")
         db.session.add(u)
         db.session.commit()
 
@@ -49,7 +49,7 @@ def test_supplier_crud_flow(app, client):
     headers = {"Authorization": f"Bearer {token}"}
 
     # Create supplier
-    payload = {"name": "ACME Supplies", "code": "ACME-001", "email": "acme@example.com", "phone": "+254700000000"}
+    payload = {"name": " ", "code": " ", "email": " ", "phone": "+254700000000"}
     res = client.post("/api/suppliers", json=payload, headers=headers)
     assert res.status_code == 201
     data = res.get_json()
