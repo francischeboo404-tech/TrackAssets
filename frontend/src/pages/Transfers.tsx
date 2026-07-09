@@ -1,19 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Share2, Clock, CheckCircle2, XCircle, MessageSquare, ArrowRightLeft, Search, Package } from 'lucide-react';
+import { Share2, Clock, CheckCircle2, XCircle, MessageSquare, ArrowRightLeft, Search, Package, MapPin, Info } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { useTransferRequests, useApproveTransfer, useRejectTransfer, useTransferStats, useDispatchTransfer, useReceiveTransfer } from '../hooks/useTransfers';
 import { useDepartments } from '../hooks/useDepartments';
+import { useWarehouses } from '../hooks/useWarehouses';
+import { useWarehouse } from '../context/WarehouseContext';
 import { cn } from '../lib/utils';
 import { useToast } from '../context/ToastContext';
 import { Can } from '../components/auth/Can';
+import { useLiveTracking } from '../context/LiveTrackingContext';
 
 const Transfers = () => {
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected'>('pending');
+  const STATUS_OPTIONS = ['all', 'pending', 'approved', 'in_transit', 'completed', 'rejected'] as const;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState<typeof STATUS_OPTIONS[number]>(() => {
+    const statusParam = searchParams.get('status');
+    return statusParam && STATUS_OPTIONS.includes(statusParam as any)
+      ? (statusParam as typeof STATUS_OPTIONS[number])
+      : 'pending';
+  });
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
+  const { activeWarehouseId } = useWarehouse();
   const { data: departments } = useDepartments();
-  const { data: requestsData, isLoading } = useTransferRequests(statusFilter, page, search, departmentId);
+  const { data: warehouses } = useWarehouses();
+  const { data: requestsData, isLoading } = useTransferRequests(statusFilter, page, search, departmentId, activeWarehouseId);
   const { data: stats } = useTransferStats();
   const requests = (requestsData as any)?.transfer_requests || [];
   const pagination = (requestsData as any)?.pagination;
@@ -24,6 +37,48 @@ const Transfers = () => {
   const dispatchMutation = useDispatchTransfer();
   const receiveMutation = useReceiveTransfer();
   const { addToast } = useToast();
+  const { positions } = useLiveTracking();
+
+  const getLivePositionForRequest = (req: any) => {
+    const key = `${req.item_type}:${req.item_type === 'inventory' ? req.inventory_item_id : req.asset_id}`;
+    return positions[key];
+  };
+
+  const getWarehouseName = (warehouseId?: number) => {
+    if (!warehouseId || !warehouses) return undefined;
+    return warehouses.find((w: any) => w.id === warehouseId)?.name;
+  };
+
+  const getLiveLocationLabel = (pos: any) => {
+    const warehouseName = getWarehouseName(pos?.warehouse_id);
+    if (warehouseName) {
+      return warehouseName;
+    }
+    if (pos?.action) {
+      return `${pos.action.replaceAll('_', ' ').toUpperCase()}`;
+    }
+    return 'Unknown location';
+  };
+
+  useEffect(() => {
+    const statusParam = searchParams.get('status');
+    if (
+      statusParam &&
+      STATUS_OPTIONS.includes(statusParam as any) &&
+      statusParam !== statusFilter
+    ) {
+      setStatusFilter(statusParam as typeof STATUS_OPTIONS[number]);
+      setPage(1);
+    }
+  }, [searchParams, statusFilter]);
+
+  const setStatus = (status: typeof STATUS_OPTIONS[number]) => {
+    setStatusFilter(status);
+    const params = new URLSearchParams(searchParams);
+    params.set('status', status);
+    setSearchParams(params);
+    setPage(1);
+  };
 
   const handleApprove = async (id: number) => {
     try {
@@ -48,23 +103,34 @@ const Transfers = () => {
     }
   };
 
+  const getErrorMessage = (error: unknown, fallback: string) => {
+    if (typeof error === 'object' && error && 'response' in error) {
+      const response = (error as { response?: { data?: { message?: string } } }).response;
+      const message = response?.data?.message;
+      if (message) {
+        return message;
+      }
+    }
+    return fallback;
+  };
+
   const handleDispatch = async (id: number) => {
     try {
-      await dispatchMutation.mutateAsync({ id });
+      const result = await dispatchMutation.mutateAsync({ id });
       queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
-      addToast('success', 'Asset Dispatched', 'Asset is now in transit.');
+      addToast('success', 'Dispatch Successful', result?.message || 'Transfer is now in transit.');
     } catch (err) {
-      addToast('error', 'Action Failed', 'Failed to dispatch asset.');
+      addToast('error', 'Dispatch Failed', getErrorMessage(err, 'Failed to dispatch transfer.'));
     }
   };
 
   const handleReceive = async (id: number) => {
     try {
-      await receiveMutation.mutateAsync({ id });
+      const result = await receiveMutation.mutateAsync({ id });
       queryClient.invalidateQueries({ queryKey: ['transfer-stats'] });
-      addToast('success', 'Asset Received', 'Asset has arrived at its destination.');
+      addToast('success', 'Receive Successful', result?.message || 'Transfer has been received.');
     } catch (err) {
-      addToast('error', 'Action Failed', 'Failed to mark asset as received.');
+      addToast('error', 'Receive Failed', getErrorMessage(err, 'Failed to mark transfer as received.'));
     }
   };
 
@@ -89,21 +155,41 @@ const Transfers = () => {
       </div>
 
       <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="flex gap-2 p-1 bg-slate-100 w-fit rounded-xl overflow-x-auto max-w-full">
-          {(['all', 'pending', 'approved', 'in_transit', 'completed', 'rejected'] as const).map((s) => (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex gap-2 p-1 bg-slate-100 w-fit rounded-xl overflow-x-auto max-w-full">
+            {STATUS_OPTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatus(s)}
+                className={cn(
+                  "px-6 py-2 rounded-lg text-sm font-bold transition-all capitalize whitespace-nowrap",
+                  statusFilter === s 
+                    ? "bg-white text-brand-primary shadow-sm" 
+                    : "text-slate-500 hover:text-slate-700"
+                )}
+              >
+                {s} {stats && `(${s === 'all' ? stats.total : stats[s as keyof typeof stats]})`}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col gap-2">
             <button
-              key={s}
-              onClick={() => { setStatusFilter(s); setPage(1); }}
-              className={cn(
-                "px-6 py-2 rounded-lg text-sm font-bold transition-all capitalize whitespace-nowrap",
-                statusFilter === s 
-                  ? "bg-white text-brand-primary shadow-sm" 
-                  : "text-slate-500 hover:text-slate-700"
-              )}
+              type="button"
+              onClick={() => setStatus('in_transit')}
+              className="px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-amber-100 text-amber-700 hover:bg-amber-200 transition-all"
             >
-              {s} {stats && `(${s === 'all' ? stats.total : stats[s as keyof typeof stats]})`}
+              View in-transit transfers
             </button>
-          ))}
+            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              <span
+                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-600 border border-slate-200"
+                title="In-transit requests with live GPS scans will show exact tracked location and current warehouse name when available."
+              >
+                <Info className="w-3.5 h-3.5" />
+              </span>
+              <span>Open Live Tracking to refresh the latest asset position.</span>
+            </div>
+          </div>
         </div>
 
         <div className="relative w-full md:w-96">
@@ -172,16 +258,62 @@ const Transfers = () => {
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Origin</span>
                       <span className="font-semibold text-slate-700">{req.from_department_name}</span>
+                      {req.from_warehouse_name && (
+                        <span className="text-[10px] text-slate-400 font-medium">{req.from_warehouse_name}</span>
+                      )}
                     </div>
                     <ArrowRightLeft className="w-4 h-4 text-slate-300 mx-2" />
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Destination</span>
                       <span className="font-semibold text-indigo-600 font-bold">{req.to_department_name}</span>
+                      {req.to_warehouse_name && (
+                        <span className="text-[10px] text-slate-400 font-medium">{req.to_warehouse_name}</span>
+                      )}
                       {req.requested_location && (
                         <span className="text-[10px] text-slate-400 font-medium italic">{req.requested_location}</span>
                       )}
                     </div>
                   </div>
+                  {req.status === 'in_transit' && req.item_type === 'inventory' && req.reservation_status && (
+                    <div className="mt-4 flex flex-col gap-3">
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Reservation</span>
+                        <div className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-[11px] font-semibold text-amber-700">
+                          <span>{req.reservation_status}</span>
+                          {typeof req.from_warehouse_reserved_quantity === 'number' && (
+                            <span className="text-slate-500">{req.from_warehouse_reserved_quantity} reserved</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 rounded-2xl bg-indigo-50 p-3">
+                        <div className="flex items-center justify-between gap-2 rounded-full bg-white px-3 py-1 text-[11px] font-semibold text-indigo-700">
+                          <span className="inline-flex items-center gap-2">
+                            <MapPin className="w-3 h-3" />
+                            Live tracking available
+                          </span>
+                          <span
+                            className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-slate-100 text-slate-600 border border-slate-200"
+                            title="Exact coordinates and named location are shown when the latest scan provides GPS and warehouse context."
+                          >
+                            <Info className="w-3.5 h-3.5" />
+                          </span>
+                        </div>
+                        {getLivePositionForRequest(req) ? (
+                          <div className="text-[11px] text-slate-600 space-y-1">
+                            <div className="font-semibold text-slate-800">Current tracked location</div>
+                            <div>Location: {getLiveLocationLabel(getLivePositionForRequest(req))}</div>
+                            <div>Lat: {getLivePositionForRequest(req)?.lat.toFixed(5)}</div>
+                            <div>Lon: {getLivePositionForRequest(req)?.lon.toFixed(5)}</div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500">
+                            Waiting for recent scan data. Open Live Tracking to refresh the latest position.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-6 bg-slate-50/50 lg:w-96 flex flex-col justify-between border-t lg:border-t-0 border-slate-100">

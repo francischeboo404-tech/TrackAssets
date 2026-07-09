@@ -15,11 +15,14 @@ class AssetRepository:
         status=None,
         department_id=None,
         search=None,
+        warehouse_id=None,
     ):
         query = asset.Asset.query.options(
             joinedload(asset.Asset.department)
         ).filter_by(organisation_id=org_id)
 
+        if warehouse_id:
+            query = query.filter(asset.Asset.warehouse_id == warehouse_id)
         if status:
             query = query.filter_by(status=status)
         if department_id:

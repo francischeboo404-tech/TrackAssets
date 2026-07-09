@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Barcode, Search, Calendar, MapPin, Tag, Activity, ArrowRight, Settings, QrCode, ArrowRightLeft, Upload, UserPlus, UserCheck, CornerDownLeft } from 'lucide-react';
 import { useAssets } from '../hooks/useAssets';
 import { useDepartments } from '../hooks/useDepartments';
+import { useWarehouse } from '../context/WarehouseContext';
 import { AssetLifecycleActions } from '../components/ui/AssetLifecycleActions';
 import { canCreateAsset, canEditAsset, canRequestTransfer, canAssignAsset, canReturnAsset } from '../lib/permissions';
 import { cn } from '../lib/utils';
@@ -43,19 +44,23 @@ const Assets = () => {
     const q = searchParams.get('q');
     if (q) setSearch(q);
   }, [searchParams]);
+
+  // Global warehouse context
+  const { activeWarehouseId } = useWarehouse();
   
   const { data, isLoading } = useAssets({ 
     search: search || undefined, 
     status: statusFilter || undefined,
     page,
     department_id: departmentId,
+    ...(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {}),
   });
   
   const assets = (data as any)?.assets || [];
   const pagination = (data as any)?.pagination;
   const { user } = useAuth();
 
-  const { data: departments } = useDepartments();
+  const { data: departments } = useDepartments(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {});
 
   const handleEdit = (asset: any) => {
     setSelectedAsset(asset);

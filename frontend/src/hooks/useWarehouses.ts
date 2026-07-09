@@ -2,6 +2,45 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import type { WarehouseUtilization } from '../types';
 
+export interface OrgWarehouseDetail {
+  id: number;
+  name: string;
+  code: string;
+  address?: string | null;
+  is_main_warehouse: boolean;
+  warehouse_type: 'main' | 'branch';
+  hierarchy_level: number;
+  stock_units: number;
+  asset_count: number;
+  asset_value: number;
+  department_count: number;
+  utilization_percentage: number;
+  total_bins: number;
+  occupied_bins: number;
+}
+
+export interface OrgWarehouseSummary {
+  total_warehouses: number;
+  total_inventory_value: number;
+  total_assets: number;
+  total_asset_value: number;
+  total_departments: number;
+  total_employees: number;
+  pending_purchase_requests: number;
+  warehouses: OrgWarehouseDetail[];
+}
+
+export const useOrgWarehouseSummary = () => {
+  return useQuery<OrgWarehouseSummary>({
+    queryKey: ['org-warehouse-summary'],
+    queryFn: async () => {
+      const response = await api.get<OrgWarehouseSummary>('/warehouses/org-summary');
+      return response.data;
+    },
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+};
 
 export const useWarehouses = () => {
   return useQuery({
@@ -74,6 +113,21 @@ export const useDeleteWarehouse = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['warehouses'] });
+      queryClient.invalidateQueries({ queryKey: ['org-warehouse-summary'] });
+    },
+  });
+};
+
+export const useSetMainWarehouse = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (warehouseId: number) => {
+      const response = await api.patch(`/warehouses/${warehouseId}/set-main`);
+      return response.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['warehouses'] });
+      queryClient.invalidateQueries({ queryKey: ['org-warehouse-summary'] });
     },
   });
 };

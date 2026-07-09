@@ -14,6 +14,7 @@ import {
   usePurchaseOrders,
   useCreatePurchaseOrder,
   useCanvassPurchaseOrder,
+  useCloseCanvassQuote,
   useApprovePurchaseOrder,
   useRejectPurchaseOrder,
 } from "../../hooks/usePurchaseOrders";
@@ -23,6 +24,9 @@ import { useInventory } from "../../hooks/useInventory";
 import { useSuppliers } from "../../hooks/useSuppliers";
 import { useToast } from "../../context/ToastContext";
 import ViewPOModal from "../../components/ui/ViewPOModal";
+import { useQuery } from '@tanstack/react-query';
+import api from '../../services/api';
+import POCanvassForm from './POCanvassForm';
 
 
 export default function PurchaseOrders() {
@@ -37,6 +41,13 @@ export default function PurchaseOrders() {
   const [supplierId, setSupplierId] = useState("");
   const [items, setItems] = useState<any[]>([]);
 
+  // Canvass modal state
+  const [showCanvassModal, setShowCanvassModal] = useState(false);
+  const [selectedPO, setSelectedPO] = useState<number | null>(null);
+  const [canvassSupplierId, setCanvassSupplierId] = useState("");
+  const [canvassItemId, setCanvassItemId] = useState("");
+  const [unitCost, setUnitCost] = useState("");
+
   const { addToast } = useToast();
 
   const { data: ordersData, isLoading } = usePurchaseOrders() as any;
@@ -50,13 +61,7 @@ export default function PurchaseOrders() {
   const approvePO = useApprovePurchaseOrder();
   const rejectPO = useRejectPurchaseOrder();
 
-
-  const [showCanvassModal, setShowCanvassModal] = useState(false);
-  const [selectedPO, setSelectedPO] = useState<number | null>(null);
-  const [supplierName, setSupplierName] = useState("");
-  const [itemName, setItemName] = useState("");
-  const [unitCost, setUnitCost] = useState("");
-
+  // legacy states kept for compatibility
   const orders = Array.isArray(ordersData?.purchase_orders)
     ? ordersData.purchase_orders
     : Array.isArray(ordersData)
@@ -641,39 +646,29 @@ export default function PurchaseOrders() {
 
       {showCanvassModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-[450px]">
+          <div className="bg-white rounded-xl p-6 w-[480px]">
             <h2 className="text-xl font-bold mb-4">Add Canvass Quote</h2>
-            <input
-              className="input-field w-full mb-3"
-              placeholder="Supplier Name"
-              value={supplierName}
-              onChange={(e) => setSupplierName(e.target.value)}
-            />
 
-            <input
-              className="input-field w-full mb-3"
-              placeholder="Item Name"
-              value={itemName}
-              onChange={(e) => setItemName(e.target.value)}
-            />
-
-            <input
-              type="number"
-              className="input-field w-full mb-4"
-              placeholder="Unit Cost"
-              value={unitCost}
-              onChange={(e) => setUnitCost(e.target.value)}
-            />
-            <div className="flex justify-end gap-3">
-              <button
-                className="btn-primary"
-                onClick={async () => {
+            {/* Fetch PO details for item dropdown */}
+            {selectedPO && (
+              <POCanvassForm
+                poId={selectedPO}
+                suppliers={suppliers}
+                onCancel={() => {
+                  setShowCanvassModal(false);
+                  setCanvassSupplierId("");
+                  setCanvassItemId("");
+                  setUnitCost("");
+                }}
+                onSave={async ({ supplier_id, item_id, supplier_name, item_name, unit_cost }: any) => {
                   try {
                     await canvassPO.mutateAsync({
                       id: selectedPO!,
-                      supplier_name: supplierName,
-                      item_name: itemName,
-                      unit_cost: Number(unitCost),
+                      supplier_id: supplier_id ? Number(supplier_id) : undefined,
+                      item_id: item_id ? Number(item_id) : undefined,
+                      supplier_name,
+                      item_name,
+                      unit_cost: Number(unit_cost),
                     });
 
                     addToast(
@@ -683,8 +678,8 @@ export default function PurchaseOrders() {
                     );
 
                     setShowCanvassModal(false);
-                    setSupplierName("");
-                    setItemName("");
+                    setCanvassSupplierId("");
+                    setCanvassItemId("");
                     setUnitCost("");
                   } catch (err: any) {
                     addToast(
@@ -694,14 +689,11 @@ export default function PurchaseOrders() {
                     );
                   }
                 }}
-              >
-                Save Quote
-              </button>
-            </div>
+              />
+            )}
           </div>
         </div>
-      )
-      }
+      )}
     </motion.div >
   );
 }

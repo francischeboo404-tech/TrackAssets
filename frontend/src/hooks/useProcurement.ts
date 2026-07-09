@@ -1,11 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 
-export const usePurchaseRequests = () => {
+export const usePurchaseRequests = (warehouseId?: number) => {
   return useQuery({
-    queryKey: ['purchase_requests'],
+    queryKey: ['purchase_requests', warehouseId],
     queryFn: async () => {
-      const res = await api.get('/procurement/purchase-requests');
+      const params: any = {};
+      if (warehouseId) params.warehouse_id = warehouseId;
+      const res = await api.get('/procurement/purchase-requests', { params });
       // backend returns { purchase_requests: [...] }
       return res.data.purchase_requests ?? res.data;
     },

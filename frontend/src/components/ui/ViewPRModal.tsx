@@ -112,6 +112,9 @@ export default function ViewPRModal({
                           Item
                         </th>
                         <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">
+                          Type
+                        </th>
+                        <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">
                           Qty
                         </th>
                         <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">
@@ -126,7 +129,10 @@ export default function ViewPRModal({
                       {pr.items?.map((item: any) => (
                         <tr key={item.id} className="table-row">
                           <td data-label="Item" className="table-cell text-sm font-medium text-slate-800">
-                            {item.name || `Item #${item.item_id}`}
+                            {item.name || `Item #${item.item_id || item.asset_id}`}
+                          </td>
+                          <td data-label="Type" className="table-cell text-sm text-slate-600">
+                            {item.item_type === 'asset' ? 'Asset' : 'Inventory'}
                           </td>
                           <td data-label="Qty" className="table-cell text-sm text-slate-600">
                             {item.quantity}

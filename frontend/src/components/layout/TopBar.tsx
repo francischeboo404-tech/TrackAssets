@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Search, Menu, Camera, Sparkles, Loader2, Package, Box, Users, Building2 } from 'lucide-react';
+import { Bell, Search, Menu, Camera, Sparkles, Loader2, Package, Box, Users, Building2, Warehouse, ChevronDown, Globe2, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useWarehouse } from '../../context/WarehouseContext';
 import { useGlobalSearch } from '../../hooks/useSearch';
 import { useAlerts } from '../../hooks/useDashboard';
 import { useNavigate } from 'react-router-dom';
@@ -27,11 +28,14 @@ function timeAgo(dateString: string): string {
 export const TopBar: React.FC<{ onMenuClick: () => void; onScanClick: () => void }> = ({ onMenuClick, onScanClick }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { warehouses, activeWarehouse, setActiveWarehouse } = useWarehouse();
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isWarehouseSwitcherOpen, setIsWarehouseSwitcherOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const warehouseSwitcherRef = useRef<HTMLDivElement>(null);
   
   const { data: searchResults, isLoading: searchLoading } = useGlobalSearch(searchQuery);
   const { data: alerts } = useAlerts();
@@ -46,6 +50,9 @@ export const TopBar: React.FC<{ onMenuClick: () => void; onScanClick: () => void
     const handleClickOutside = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setIsNotificationsOpen(false);
+      }
+      if (warehouseSwitcherRef.current && !warehouseSwitcherRef.current.contains(e.target as Node)) {
+        setIsWarehouseSwitcherOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -216,7 +223,96 @@ export const TopBar: React.FC<{ onMenuClick: () => void; onScanClick: () => void
         </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-6">
+      <div className="flex items-center gap-2 sm:gap-4">
+
+        {/* ── Warehouse Switcher ── */}
+        {warehouses.length > 0 && (
+          <div ref={warehouseSwitcherRef} className="relative hidden sm:block">
+            <button
+              id="warehouse-switcher-btn"
+              onClick={() => setIsWarehouseSwitcherOpen(!isWarehouseSwitcherOpen)}
+              className="flex items-center gap-2 bg-white border border-slate-200 hover:border-brand-primary/50 hover:bg-brand-50/30 px-3 py-2 rounded-xl text-sm font-semibold transition-all duration-200 shadow-sm group max-w-[220px]"
+            >
+              <div className={`p-1 rounded-lg shrink-0 ${
+                activeWarehouse?.is_main_warehouse
+                  ? 'bg-brand-primary/10 text-brand-primary'
+                  : activeWarehouse
+                  ? 'bg-amber-50 text-amber-600'
+                  : 'bg-slate-100 text-slate-500'
+              }`}>
+                {activeWarehouse ? <Warehouse className="w-3.5 h-3.5" /> : <Globe2 className="w-3.5 h-3.5" />}
+              </div>
+              <div className="text-left min-w-0">
+                <p className="text-[11px] font-bold text-slate-800 truncate leading-none">
+                  {activeWarehouse?.name ?? 'All Warehouses'}
+                </p>
+                {activeWarehouse && (
+                  <p className="text-[9px] font-bold uppercase tracking-wider mt-0.5 leading-none text-slate-400">
+                    {activeWarehouse.is_main_warehouse ? 'HQ' : 'Branch'} · {activeWarehouse.code}
+                  </p>
+                )}
+              </div>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${isWarehouseSwitcherOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isWarehouseSwitcherOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in slide-in-from-top-2 duration-200">
+                <div className="p-2.5 border-b border-slate-100 bg-slate-50">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Switch Warehouse</p>
+                </div>
+                <div className="py-1.5 max-h-72 overflow-y-auto">
+                  {/* All Warehouses option */}
+                  <button
+                    id="switch-all-warehouses"
+                    onClick={() => { setActiveWarehouse(null); setIsWarehouseSwitcherOpen(false); }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left ${
+                      !activeWarehouse ? 'bg-brand-50/50' : ''
+                    }`}
+                  >
+                    <div className="p-1.5 bg-slate-100 rounded-lg">
+                      <Globe2 className="w-4 h-4 text-slate-500" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-800">All Warehouses</p>
+                      <p className="text-[10px] text-slate-400 font-medium">Aggregated org-wide view</p>
+                    </div>
+                    {!activeWarehouse && <CheckCircle2 className="w-4 h-4 text-brand-primary shrink-0" />}
+                  </button>
+
+                  {warehouses.map((wh) => (
+                    <button
+                      key={wh.id}
+                      id={`switch-warehouse-${wh.id}`}
+                      onClick={() => { setActiveWarehouse(wh); setIsWarehouseSwitcherOpen(false); }}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left ${
+                        activeWarehouse?.id === wh.id ? 'bg-brand-50/50' : ''
+                      }`}
+                    >
+                      <div className={`p-1.5 rounded-lg ${
+                        wh.is_main_warehouse ? 'bg-brand-primary/10' : 'bg-amber-50'
+                      }`}>
+                        <Warehouse className={`w-4 h-4 ${
+                          wh.is_main_warehouse ? 'text-brand-primary' : 'text-amber-600'
+                        }`} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-bold text-slate-800 truncate">{wh.name}</p>
+                          {wh.is_main_warehouse && (
+                            <span className="text-[8px] font-bold uppercase tracking-wider bg-brand-primary/10 text-brand-primary px-1.5 py-0.5 rounded-md shrink-0">HQ</span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-mono">{wh.code}</p>
+                      </div>
+                      {activeWarehouse?.id === wh.id && <CheckCircle2 className="w-4 h-4 text-brand-primary shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <button 
           onClick={onScanClick}
           className="flex items-center gap-2 bg-gradient-to-r from-brand-primary to-brand-400 hover:from-brand-700 hover:to-brand-500 text-white px-3 py-2 sm:px-5 sm:py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 shadow-lg shadow-brand-primary/20 hover:shadow-xl hover:shadow-brand-primary/30 hover:-translate-y-0.5 group border border-brand-primary/20"

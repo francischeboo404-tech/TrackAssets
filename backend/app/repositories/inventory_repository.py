@@ -8,14 +8,25 @@ class InventoryRepository:
     """Repository encapsulating ORM queries for inventory items."""
 
     def list_items(
-        self, org_id, page=1, per_page=50, search=None, low_stock_only=False, department_id=None
+        self, org_id, page=1, per_page=50, search=None, low_stock_only=False, department_id=None, warehouse_id=None
     ):
         query = inventory.InventoryItem.query.filter_by(
             organisation_id=org_id, is_active=True
         )
 
+        # Filter by warehouse_id: only items with stock in the specified warehouse
+        if warehouse_id:
+            wh_items_sq = (
+                db.session.query(stock_levels.WarehouseStock.item_id)
+                .filter(stock_levels.WarehouseStock.warehouse_id == warehouse_id)
+                .subquery()
+            )
+            query = query.filter(inventory.InventoryItem.id.in_(
+                db.session.query(wh_items_sq.c.item_id)
+            ))
+
         # If a department is provided, attempt to scope items to the department's warehouse
-        if department_id:
+        if department_id and not warehouse_id:
             from app.models.organization import Department
 
             dept = (
@@ -52,6 +63,9 @@ class InventoryRepository:
                     query = query.filter(inventory.InventoryItem.id.in_(
                         db.session.query(union_sq.c.item_id)
                     ))
+        elif department_id and warehouse_id:
+            # Both provided: filter by department within warehouse context
+            query = query.filter(inventory.InventoryItem.warehouse_id.isnot(None))
 
         if search:
             query = query.outerjoin(stock_levels.WarehouseStock).outerjoin(

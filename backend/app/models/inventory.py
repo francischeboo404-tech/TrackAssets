@@ -159,27 +159,29 @@ class InventoryItem(db.Model):
         
         if warehouse_id:
             from app.models.stock_levels import WarehouseStock
+            from flask import current_app
 
-            print("======================")
-            print("Warehouse:", warehouse_id)
-            print("Item:", self.id)
-            print("Quantity:", quantity)
+            current_app.logger.debug(
+                "remove_stock: warehouse=%s item=%s qty=%s",
+                warehouse_id, self.id, quantity,
+            )
 
             wh_stock = WarehouseStock.query.with_for_update().filter_by(
                 item_id=self.id, warehouse_id=warehouse_id
             ).first()
 
-            print("Warehouse Stock:", wh_stock)
-
             if wh_stock:
-                print("On Hand:", wh_stock.quantity_on_hand)
-                print("Reserved:", wh_stock.quantity_reserved)
-                print("Available:", wh_stock.quantity_available)    
-            
+                current_app.logger.debug(
+                    "remove_stock: on_hand=%s reserved=%s available=%s",
+                    wh_stock.quantity_on_hand,
+                    wh_stock.quantity_reserved,
+                    wh_stock.quantity_available,
+                )
+
             if not wh_stock or wh_stock.quantity_on_hand < quantity:
                 from app.errors import ValidationError
                 raise ValidationError("Insufficient stock in specified warehouse")
-            
+
             wh_stock.quantity_on_hand -= quantity
 
         item.quantity -= quantity
@@ -287,9 +289,11 @@ class StockMovement(db.Model):
             "quantity > 0", name="ck_stock_movement_qty_positive"
         ),
         db.Index("ix_stock_movements_item_id", "item_id"),
+        db.Index("ix_stock_movements_org_id", "organization_id"),
         db.Index("ix_stock_movements_type", "type"),
         db.Index("ix_stock_movements_date", "date"),
         db.Index("ix_stock_movements_item_date", "item_id", "date"),
+        db.Index("ix_stock_movements_org_date", "organization_id", "date"),
     )
 
     def __repr__(self):
@@ -306,6 +310,10 @@ class AuditLog(db.Model):
         db.Integer, db.ForeignKey("organizations.id"), nullable=False
     )
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"))
+    # warehouse_id: nullable FK enabling per-warehouse audit trail filtering
+    warehouse_id = db.Column(
+        db.Integer, db.ForeignKey("warehouses.id"), nullable=True
+    )
     action = db.Column(db.String(100), nullable=False)
     entity_type = db.Column(db.String(100))
     entity_id = db.Column(db.Integer)
@@ -319,6 +327,7 @@ class AuditLog(db.Model):
     __table_args__ = (
         db.Index("ix_audit_logs_org_id", "organisation_id"),
         db.Index("ix_audit_logs_user_id", "user_id"),
+        db.Index("ix_audit_logs_warehouse_id", "warehouse_id"),
         db.Index("ix_audit_logs_entity", "entity_type", "entity_id"),
         db.Index("ix_audit_logs_action", "action"),
         db.Index("ix_audit_logs_module", "module"),

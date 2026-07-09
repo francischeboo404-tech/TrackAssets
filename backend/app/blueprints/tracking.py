@@ -1,8 +1,10 @@
 from flask import Blueprint, g, jsonify, request
 from marshmallow import Schema, fields
 
+from app import limiter
 from app.auth_utils import get_current_organisation_id, jwt_required_with_user
-from app.errors import ValidationError
+from app.errors import ValidationError, NotFoundError, ConflictError
+from flask import current_app
 from app.services.anomaly_service import AnomalyService
 from app.services.qr_service import QRService
 from app.services.tracking_service import TrackingService
@@ -34,6 +36,7 @@ class VerifyRequestSchema(Schema):
 
 @tracking_bp.route("/qr/<string:entity_type>/<int:entity_id>", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("30 per minute")
 def get_entity_qr(entity_type, entity_id):
     """Generate or return signed QR payload for an asset or inventory item."""
     org_id = get_current_organisation_id()
@@ -43,6 +46,7 @@ def get_entity_qr(entity_type, entity_id):
 
 @tracking_bp.route("/scan/verify", methods=["POST"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def verify_scan():
     """Verify QR authenticity without mutating state (viewer-safe)."""
     data = request.get_json() or {}
@@ -59,6 +63,7 @@ def verify_scan():
 
 @tracking_bp.route("/scan", methods=["POST"])
 @jwt_required_with_user
+@limiter.limit("30 per minute")
 def record_scan():
     """Process a QR scan: validate, log immutable event, apply state if permitted."""
     data = request.get_json()
@@ -71,35 +76,49 @@ def record_scan():
     if "notes" in validated_data:
         validated_data["notes"] = sanitize_string(validated_data["notes"])
 
-    item, event = TrackingService.record_scan(
-        org_id=org_id,
-        user_id=g.user.id,
-        user_role=g.user.role,
-        **validated_data,
-    )
+    try:
+        item, event = TrackingService.record_scan(
+            org_id=org_id,
+            user_id=g.user.id,
+            user_role=g.user.role,
+            **validated_data,
+        )
 
-    history = TrackingService.get_history(org_id, event.item_type, item.id)
-    anomalies = AnomalyService.analyze_scan(event)
+        history = TrackingService.get_history(org_id, event.item_type, item.id)
+        anomalies = AnomalyService.analyze_scan(event)
 
-    return (
-        jsonify(
-            {
-                "message": "Scan recorded successfully",
-                "scan_event_id": event.id,
-                "item": {
-                    "type": event.item_type,
-                    "id": item.id,
-                    "status": _serialize_item_status(item, event.item_type),
-                    "state": event.new_state,
-                },
-                "history": [
-                    TrackingService.serialize_event(h) for h in history
-                ],
-                "anomalies": anomalies,
-            }
-        ),
-        200,
-    )
+        return (
+            jsonify(
+                {
+                    "message": "Scan recorded successfully",
+                    "scan_event_id": event.id,
+                    "item": {
+                        "type": event.item_type,
+                        "id": item.id,
+                        "status": _serialize_item_status(item, event.item_type),
+                        "state": event.new_state,
+                    },
+                    "history": [
+                        TrackingService.serialize_event(h) for h in history
+                    ],
+                    "anomalies": anomalies,
+                }
+            ),
+            200,
+        )
+    except ValidationError as ve:
+        current_app.logger.warning("Validation error during scan: %s", ve)
+        return jsonify({"message": str(ve)}), 400
+    except ConflictError as ce:
+        current_app.logger.info("Duplicate scan suppressed: %s", ce)
+        return jsonify({"message": str(ce)}), 409
+    except NotFoundError as nfe:
+        current_app.logger.info("Scan target not found: %s", nfe)
+        return jsonify({"message": str(nfe)}), 404
+    except Exception as e:
+        # Log full traceback for diagnosis and return generic JSON to client
+        current_app.logger.exception("Unhandled error while recording scan")
+        return jsonify({"message": "Internal server error while processing scan"}), 500
 
 
 @tracking_bp.route("/scan", methods=["OPTIONS"])
@@ -109,6 +128,7 @@ def record_scan_options():
 
 @tracking_bp.route("/bin-environment/<int:bin_id>", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def get_bin_environment(bin_id):
     org_id = get_current_organisation_id()
     env_data = TrackingService.get_bin_environment(bin_id, org_id)
@@ -117,6 +137,7 @@ def get_bin_environment(bin_id):
 
 @tracking_bp.route("/history/<string:item_type>/<int:item_id>", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("100 per minute")
 def get_item_history(item_type, item_id):
     org_id = get_current_organisation_id()
     history = TrackingService.get_history(org_id, item_type, item_id)
@@ -137,6 +158,7 @@ def get_item_history(item_type, item_id):
 
 @tracking_bp.route("/live-positions", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def get_live_positions():
     """Return the latest GPS-tagged scan event per item for the organisation."""
     from app import db
@@ -189,6 +211,7 @@ def get_live_positions():
 
 @tracking_bp.route("/allowed-actions", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("100 per minute")
 def get_allowed_scan_actions():
     """Return scan action types permitted for the current user's role."""
     from app.tracking_rbac import SCAN_ACTION_ROLES

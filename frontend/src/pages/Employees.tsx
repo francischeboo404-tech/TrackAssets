@@ -4,6 +4,7 @@ import { useDepartments } from '../hooks/useDepartments';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
 import Spinner from '../components/ui/Spinner';
+import { useWarehouse } from '../context/WarehouseContext';
 
 const Employees: React.FC = () => {
   const [page, setPage] = useState<number>(1);
@@ -21,7 +22,8 @@ const Employees: React.FC = () => {
   const { data, isLoading } = useEmployees({ page, per_page: perPage, q: debouncedSearch || undefined, sort, department_id: departmentFilter });
   const employees = data?.employees || [];
   const pagination = data?.pagination || { page: 1, per_page: perPage, total: 0 };
-  const { data: departments = [] } = useDepartments();
+  const { activeWarehouseId } = useWarehouse();
+  const { data: departments = [] } = useDepartments(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {});
   const createEmployee = useCreateEmployee();
   const updateEmployee = useUpdateEmployee();
   const deleteEmployee = useDeleteEmployee();

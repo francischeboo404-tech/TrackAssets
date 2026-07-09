@@ -5,6 +5,7 @@ export const ROLE_PERMISSIONS: Record<string, string[]> = {
   logistics_officer: ['assets:view', 'assets:create', 'assets:edit', 'assets:transition', 'inventory:view', 'inventory:stock', 'transfers:create', 'transfers:view', 'warehouses:view', 'disposal:create', 'variance:create'],
   procurement_officer: ['assets:view', 'assets:approve', 'assets:transition', 'transfers:approve', 'transfers:create', 'transfers:view', 'reports:view'],
   employee: ['assets:view', 'inventory:view', 'warehouses:view', 'reports:view'],
+  auditor: ['assets:view', 'inventory:view', 'audit:view', 'reports:view'],
 };
 
 export function roleHasPermission(role: string | undefined | null, permission: string): boolean {

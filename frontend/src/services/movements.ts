@@ -19,3 +19,8 @@ export const listReturns = async (params = {}) => {
   const res = await api.get('/movements/returns', { params });
   return res.data;
 };
+
+export const listMovementHistory = async (params = {}) => {
+  const res = await api.get('/movements/history', { params });
+  return res.data;
+};

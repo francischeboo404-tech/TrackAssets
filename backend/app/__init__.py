@@ -1,4 +1,6 @@
 import os
+import shutil
+import os as _os
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
@@ -8,13 +10,14 @@ from flask_jwt_extended import JWTManager, get_jwt, verify_jwt_in_request
 from flask_talisman import Talisman
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sa_text
-import shutil
-import os as _os
 
 db = SQLAlchemy()
 jwt = JWTManager()
+mail = Mail()
+
 
 # Rate Limiting
 storage_uri = os.environ.get("RATELIMIT_STORAGE_URL", "memory://")
@@ -54,26 +57,42 @@ def create_app(config_name=None):
         app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL") or "sqlite:///trackit_dev.db"
 
     db.init_app(app)
-    
+
     # Configure SQLite to use WAL mode and busy timeout to prevent "database is locked" errors
     from sqlalchemy import event
     from sqlalchemy.engine import Engine
-    
+
     @event.listens_for(Engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
-        if type(dbapi_connection).__name__ == "Connection": # sqlite3.Connection
+        if type(dbapi_connection).__name__ == "Connection":  # sqlite3.Connection
             try:
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA journal_mode=WAL")
                 cursor.execute("PRAGMA synchronous=NORMAL")
-                cursor.execute("PRAGMA busy_timeout=15000") # Wait 15 seconds for a lock
+                cursor.execute("PRAGMA busy_timeout=15000")  # Wait 15 seconds for a lock
                 cursor.execute("PRAGMA foreign_keys=ON")
                 cursor.close()
             except Exception:
                 pass
 
     jwt.init_app(app)
+    mail.init_app(app)
     limiter.init_app(app)
+
+    # Development-time request logging to help diagnose 404/routing issues
+    if app.config.get("DEBUG"):
+        @app.before_request
+        def _log_incoming_request():
+            try:
+                app.logger.debug(
+                    "Incoming request: %s %s from %s headers=%s",
+                    request.method,
+                    request.path,
+                    request.remote_addr,
+                    {k: request.headers.get(k) for k in ['Host', 'Origin', 'Referer', 'User-Agent']},
+                )
+            except Exception:
+                app.logger.debug("Incoming request: %s %s", request.method, request.path)
 
     # Configure CORS strictly
     cors_origins = app.config.get("CORS_ORIGINS", [])
@@ -186,11 +205,12 @@ def create_app(config_name=None):
         def serve_org_logo(filename):
             """Serve organization logo uploads."""
             from flask import send_from_directory
+            import os
 
             if os.environ.get("VERCEL") == "1":
                 directory = "/tmp/uploads/logos"
             else:
-                directory = _os.path.join(app.root_path, "static", "uploads", "logos")
+                directory = os.path.join(app.root_path, "static", "uploads", "logos")
                 
             return send_from_directory(directory, filename)
 
@@ -253,6 +273,23 @@ def create_app(config_name=None):
                         ),
                         401,
                     )
+
+                # Development-only diagnostic fallback for unmatched /api/* routes.
+                # This helps front-end developers see why a request returned 404 (host, origin, path).
+                if app.config.get("DEBUG"):
+                    @app.route('/api/<path:unmatched>', methods=['GET','POST','PUT','PATCH','DELETE','OPTIONS'])
+                    def _api_unmatched(unmatched):
+                        from flask import make_response
+                        app.logger.debug('Unmatched API request: %s %s origin=%s host=%s', request.method, request.path, request.headers.get('Origin'), request.headers.get('Host'))
+                        payload = {
+                            'error': 'not_found',
+                            'message': 'No matching API route for this path (development diagnostic)',
+                            'requested_path': request.path,
+                            'host': request.headers.get('Host'),
+                            'origin': request.headers.get('Origin'),
+                            'method': request.method,
+                        }
+                        return make_response((jsonify(payload), 404))
 
             db_status = "skipped"
             if request.args.get("db", "").lower() in ("1", "true", "yes"):
@@ -487,9 +524,11 @@ def create_app(config_name=None):
         # Register error handlers
         from app.errors import register_error_handlers
         from app.logging_utils import configure_logging
+        from app.movement_schema import ensure_movement_schema_columns
 
         register_error_handlers(app)
         configure_logging(app)
+        ensure_movement_schema_columns(app)
 
         # db.create_all() # Moved to migrations
 

@@ -46,6 +46,7 @@ def get_inventory():
     search = request.args.get("search")
     low_stock_only = request.args.get("low_stock_only", type=bool)
     department_id = request.args.get("department_id", type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
 
     # Call service.list_items defensively — tests may monkeypatch the service
     try:
@@ -56,6 +57,7 @@ def get_inventory():
             search=search,
             low_stock_only=low_stock_only,
             department_id=department_id,
+            warehouse_id=warehouse_id,
         )
     except TypeError:
         # Fallback for older/mocked implementations that don't accept department_id

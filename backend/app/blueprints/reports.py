@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import Blueprint, g, jsonify, request, send_file
 
+from app import limiter
 from app.auth_utils import (
     get_current_organisation_id,
     jwt_required_with_user,
@@ -10,8 +11,10 @@ from app.auth_utils import (
 from app.rbac import assert_can_access_report, filter_report_payload
 from app.services.report_analytics_service import ReportAnalyticsService
 from app.services.reporting_service import ReportingService
+from app.cache import cache
 
 reports_bp = Blueprint("reports", __name__)
+CACHE_TTL_REPORTS = 120
 
 
 def _report_json(data, message="Report generated successfully"):
@@ -28,11 +31,13 @@ def _department_scope():
 
 @reports_bp.route("/assets", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def report_assets():
     """JSON asset analytics for charts (server-aggregated)."""
     assert_can_access_report(g.user.role, "assets")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
     # allow admins to request a specific department by id
     dept_id = request.args.get("department_id", type=int)
     department_name = _department_scope()
@@ -42,47 +47,83 @@ def report_assets():
         if dept:
             department_name = dept.name
 
+    role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
+    cache_key = f"reports:assets:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
+
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return _report_json(cached_data)
+
     data = ReportAnalyticsService.get_assets_report(
-        org_id, days=days, department_name=department_name
+        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
     )
     data = filter_report_payload(g.user.role, "assets", data)
+    cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
     return _report_json(data)
 
 
 @reports_bp.route("/inventory", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def report_inventory():
     """JSON inventory analytics for charts."""
     assert_can_access_report(g.user.role, "inventory")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
     dept_id = request.args.get("department_id", type=int)
-    data = ReportAnalyticsService.get_inventory_report(org_id, days=days, department_id=dept_id)
+    warehouse_id = request.args.get("warehouse_id", type=int)
+    department_name = _department_scope()
+    role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
+    cache_key = f"reports:inventory:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
+
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return _report_json(cached_data)
+
+    data = ReportAnalyticsService.get_inventory_report(
+        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
+    )
     data = filter_report_payload(g.user.role, "inventory", data)
+    cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
     return _report_json(data)
 
 
 @reports_bp.route("/tracking", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def report_tracking():
     """JSON tracking / scan / activity analytics."""
     assert_can_access_report(g.user.role, "tracking")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
     dept_id = request.args.get("department_id", type=int)
-    data = ReportAnalyticsService.get_tracking_report(org_id, days=days, department_id=dept_id)
+    warehouse_id = request.args.get("warehouse_id", type=int)
+    department_name = _department_scope()
+    role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
+    cache_key = f"reports:tracking:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
+
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return _report_json(cached_data)
+
+    data = ReportAnalyticsService.get_tracking_report(
+        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
+    )
     data = filter_report_payload(g.user.role, "tracking", data)
+    cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
     return _report_json(data)
 
 
 @reports_bp.route("/dashboard", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def report_dashboard():
     """Unified procurement intelligence dashboard payload."""
     assert_can_access_report(g.user.role, "dashboard")
     org_id = get_current_organisation_id()
     days = request.args.get("days", 30, type=int)
     dept_id = request.args.get("department_id", type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
     department_name = _department_scope()
     if dept_id and g.user.role == 'admin':
         from app.models.organization import Department
@@ -90,10 +131,18 @@ def report_dashboard():
         if dept:
             department_name = dept.name
 
+    role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
+    cache_key = f"reports:dashboard:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
+
+    cached_data = cache.get(cache_key)
+    if cached_data is not None:
+        return _report_json(cached_data)
+
     data = ReportAnalyticsService.get_dashboard_report(
-        org_id, days=days, department_name=department_name
+        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
     )
     data = filter_report_payload(g.user.role, "dashboard", data)
+    cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
     return _report_json(data)
 
 
@@ -122,6 +171,7 @@ def _dated_filename(base: str, ext: str) -> str:
 @reports_bp.route("/asset-register", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "auditor")
+@limiter.limit("5 per minute")
 def export_asset_register():
     org_id = get_current_organisation_id()
     fmt = request.args.get("format", "pdf")
@@ -151,6 +201,7 @@ def export_asset_register():
 @reports_bp.route("/inventory-register", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "auditor", "store_manager")
+@limiter.limit("5 per minute")
 def export_inventory_register():
     org_id = get_current_organisation_id()
     fmt = request.args.get("format", "excel")
@@ -179,6 +230,7 @@ def export_inventory_register():
 @reports_bp.route("/full-export", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("3 per minute")
 def export_full_workbook():
     """Combined Excel workbook: Assets + Inventory sheets."""
     org_id = get_current_organisation_id()
@@ -197,6 +249,7 @@ def export_full_workbook():
 @reports_bp.route("/maintenance", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("5 per minute")
 def export_maintenance_report():
     org_id = get_current_organisation_id()
     date_from, date_to = parse_dates()
@@ -214,6 +267,7 @@ def export_maintenance_report():
 @reports_bp.route("/disposal", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("5 per minute")
 def export_disposal_report():
     org_id = get_current_organisation_id()
     date_from, date_to = parse_dates()
@@ -231,6 +285,7 @@ def export_disposal_report():
 @reports_bp.route("/audit-trail", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "auditor")
+@limiter.limit("5 per minute")
 def export_audit_report():
     org_id = get_current_organisation_id()
     date_from, date_to = parse_dates()
@@ -248,6 +303,7 @@ def export_audit_report():
 @reports_bp.route("/department-summary", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("5 per minute")
 def export_dept_summary():
     org_id = get_current_organisation_id()
     date_from, date_to = parse_dates()

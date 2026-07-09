@@ -382,6 +382,7 @@ def get_transfer_requests():
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 50, type=int)
     department_id = request.args.get("department_id", type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
 
     from sqlalchemy.orm import joinedload
 
@@ -428,6 +429,15 @@ def get_transfer_requests():
             )
         )
 
+    # Warehouse scoping: show requests involving the active warehouse
+    if warehouse_id:
+        query = query.filter(
+            db.or_(
+                transfer.TransferRequest.from_warehouse_id == warehouse_id,
+                transfer.TransferRequest.to_warehouse_id == warehouse_id,
+            )
+        )
+
     # Filter based on user role
     if g.user.role not in ["admin", "store_manager"]:
         # Non-admins can only see requests they created or for
@@ -446,6 +456,26 @@ def get_transfer_requests():
     requests = query.order_by(
         transfer.TransferRequest.requested_at.desc()
     ).paginate(page=page, per_page=per_page, error_out=False)
+
+    from app.models.location_topology import Warehouse
+    from app.models.stock_levels import WarehouseStock
+
+    warehouse_name_map = {}
+    warehouse_ids = {
+        r.from_warehouse_id for r in requests.items if r.from_warehouse_id is not None
+    } | {
+        r.to_warehouse_id for r in requests.items if r.to_warehouse_id is not None
+    }
+    if warehouse_ids:
+        for warehouse in Warehouse.query.filter(Warehouse.id.in_(warehouse_ids)).all():
+            warehouse_name_map[warehouse.id] = warehouse.name
+
+    reserves_map = {}
+    if warehouse_ids:
+        for wh_stock in WarehouseStock.query.filter(
+            WarehouseStock.warehouse_id.in_(warehouse_ids)
+        ).all():
+            reserves_map[(wh_stock.item_id, wh_stock.warehouse_id)] = wh_stock.quantity_reserved or 0
 
     return (
         jsonify(
@@ -467,6 +497,30 @@ def get_transfer_requests():
                         "to_department": r.to_department_id,
                         "to_department_name": (
                             r.to_department.name if r.to_department else None
+                        ),
+                        "from_warehouse_id": r.from_warehouse_id,
+                        "from_warehouse_name": (
+                            warehouse_name_map.get(r.from_warehouse_id)
+                            if r.from_warehouse_id is not None
+                            else None
+                        ),
+                        "to_warehouse_id": r.to_warehouse_id,
+                        "to_warehouse_name": (
+                            warehouse_name_map.get(r.to_warehouse_id)
+                            if r.to_warehouse_id is not None
+                            else None
+                        ),
+                        "from_warehouse_reserved_quantity": (
+                            reserves_map.get((r.inventory_item_id, r.from_warehouse_id), 0)
+                            if r.inventory_item_id and r.from_warehouse_id is not None
+                            else None
+                        ),
+                        "reservation_status": (
+                            "reserved"
+                            if r.status == "in_transit"
+                            and r.item_type == "inventory"
+                            and r.from_warehouse_id is not None
+                            else None
                         ),
                         "from_user_id": r.from_user_id,
                         "from_user_name": (
@@ -773,6 +827,22 @@ def dispatch_transfer_request(request_id):
         # Stock deduction and warehouse transfer happens at receive time
         # This keeps inventory recoverable if dispatch fails between dispatch and receive
         old_location = f"In Transit to Warehouse {transfer_req.to_warehouse_id}"
+        # Reserve stock at source warehouse to prevent other allocations until receive
+        if transfer_req.from_warehouse_id is not None:
+            try:
+                from app.services.inventory_service import InventoryService
+                from app.repositories.inventory_repository import InventoryRepository
+                inventory_service = InventoryService(repository=InventoryRepository(), session=db.session)
+                inventory_service.reserve_stock(
+                    inv_item.id,
+                    org_id,
+                    transfer_req.quantity,
+                    warehouse_id=transfer_req.from_warehouse_id,
+                    reference=f"Transfer Dispatch {transfer_req.id}",
+                )
+            except Exception:
+                # Reservation failure should not block dispatch; allow manual reconciliation
+                pass
         item_id = inv_item.id
 
     AuditService.log_action(
@@ -978,6 +1048,17 @@ def receive_transfer_request(request_id):
         # This ensures atomic deduction from source and addition to destination
         if transfer_req.from_warehouse_id and transfer_req.to_warehouse_id:
             # If stock wasn't deducted at dispatch (shouldn't happen now), do the full transfer here
+            # Unreserve previously reserved stock at source warehouse before finalizing transfer
+            try:
+                inventory_service.unreserve_stock(
+                    inv_item.id,
+                    org_id,
+                    transfer_req.quantity,
+                    warehouse_id=transfer_req.from_warehouse_id,
+                    reference=f"Transfer Receive {transfer_req.id}",
+                )
+            except Exception:
+                pass
             inventory_service.update_stock(
                 inv_item.id,
                 org_id,
@@ -990,6 +1071,16 @@ def receive_transfer_request(request_id):
             )
         elif transfer_req.to_warehouse_id:
             # Only destination warehouse specified, just add stock
+            try:
+                inventory_service.unreserve_stock(
+                    inv_item.id,
+                    org_id,
+                    transfer_req.quantity,
+                    warehouse_id=transfer_req.from_warehouse_id,
+                    reference=f"Transfer Receive {transfer_req.id}",
+                )
+            except Exception:
+                pass
             inventory_service.update_stock(
                 inv_item.id,
                 org_id,

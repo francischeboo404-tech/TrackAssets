@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify, request
-from app import db
+from app import db, limiter
 from app.auth_utils import jwt_required_with_user, get_current_organisation_id
 from app.models import Asset, InventoryItem, User, Department
 
@@ -7,6 +7,7 @@ search_bp = Blueprint("search", __name__)
 
 @search_bp.route("/", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("100 per minute")
 def global_search():
     """Global search across multiple entities."""
     org_id = get_current_organisation_id()

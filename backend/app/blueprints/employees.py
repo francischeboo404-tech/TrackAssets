@@ -15,10 +15,14 @@ def list_employees():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     department_id = request.args.get('department_id', type=int)
+    warehouse_id = request.args.get('warehouse_id', type=int)
     search = request.args.get('q', type=str)
     sort = request.args.get('sort', type=str)
 
-    pagination = EmployeeService.list_employees(org_id, department_id=department_id, page=page, per_page=per_page, search=search, sort=sort)
+    pagination = EmployeeService.list_employees(
+        org_id, department_id=department_id, warehouse_id=warehouse_id,
+        page=page, per_page=per_page, search=search, sort=sort
+    )
     result = [
         {
             'id': e.id,

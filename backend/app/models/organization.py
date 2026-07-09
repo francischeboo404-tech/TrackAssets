@@ -189,8 +189,12 @@ class ItemIssue(db.Model):
         db.Integer, db.ForeignKey("organizations.id"), nullable=False
     )
     item_id = db.Column(
-        db.Integer, db.ForeignKey("inventory_items.id"), nullable=False
+        db.Integer, db.ForeignKey("inventory_items.id"), nullable=True
     )
+    asset_id = db.Column(
+        db.Integer, db.ForeignKey("assets.id"), nullable=True
+    )
+    item_type = db.Column(db.String(50), nullable=False, default="inventory")
     from_warehouse_id = db.Column(
         db.Integer, db.ForeignKey("warehouses.id"), nullable=False
     )
@@ -214,6 +218,8 @@ class ItemIssue(db.Model):
     __table_args__ = (
         db.Index("ix_item_issues_org_id", "organisation_id"),
         db.Index("ix_item_issues_item_id", "item_id"),
+        db.Index("ix_item_issues_asset_id", "asset_id"),
+        db.Index("ix_item_issues_item_type", "item_type"),
         db.Index("ix_item_issues_warehouse_id", "from_warehouse_id"),
         db.Index("ix_item_issues_department_id", "to_department_id"),
         db.Index("ix_item_issues_employee_id", "employee_id"),
@@ -224,6 +230,11 @@ class ItemIssue(db.Model):
         "InventoryItem",
         backref="issues",
         foreign_keys=[item_id]
+    )
+    asset = db.relationship(
+        "Asset",
+        backref="issues",
+        foreign_keys=[asset_id]
     )
 
     from_warehouse = db.relationship(
@@ -258,8 +269,12 @@ class ItemReturn(db.Model):
         db.Integer, db.ForeignKey("organizations.id"), nullable=False
     )
     item_id = db.Column(
-        db.Integer, db.ForeignKey("inventory_items.id"), nullable=False
+        db.Integer, db.ForeignKey("inventory_items.id"), nullable=True
     )
+    asset_id = db.Column(
+        db.Integer, db.ForeignKey("assets.id"), nullable=True
+    )
+    item_type = db.Column(db.String(50), nullable=False, default="inventory")
     from_department_id = db.Column(
         db.Integer, db.ForeignKey("departments.id"), nullable=False
     )
@@ -288,6 +303,8 @@ class ItemReturn(db.Model):
     __table_args__ = (
         db.Index("ix_item_returns_org_id", "organisation_id"),
         db.Index("ix_item_returns_item_id", "item_id"),
+        db.Index("ix_item_returns_asset_id", "asset_id"),
+        db.Index("ix_item_returns_item_type", "item_type"),
         db.Index("ix_item_returns_department_id", "from_department_id"),
         db.Index("ix_item_returns_warehouse_id", "to_warehouse_id"),
         db.Index("ix_item_returns_employee_id", "employee_id"),
@@ -298,6 +315,11 @@ class ItemReturn(db.Model):
         "InventoryItem",
         backref="returns",
         foreign_keys=[item_id]
+    )
+    asset = db.relationship(
+        "Asset",
+        backref="returns",
+        foreign_keys=[asset_id]
     )
 
     from_department = db.relationship(

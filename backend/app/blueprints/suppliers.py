@@ -1,13 +1,15 @@
 from flask import Blueprint, request, jsonify
-from app import db
+from app import db, limiter
 from app.models.supplier import Supplier
 from app.auth_utils import require_role, get_current_organisation_id
 from app.errors import NotFoundError, ValidationError
 
 suppliers_bp = Blueprint("suppliers", __name__)
 
+
 @suppliers_bp.route("", methods=["GET"])
 @require_role("admin", "procurement_officer", "store_manager", "logistics_officer", "auditor")
+@limiter.limit("100 per minute")
 def list_suppliers():
     """List all active suppliers for the current organization"""
     org_id = get_current_organisation_id()
@@ -33,6 +35,7 @@ def list_suppliers():
 
 @suppliers_bp.route("", methods=["POST"])
 @require_role("admin", "procurement_officer")
+@limiter.limit("20 per minute")
 def create_supplier():
     """Create a new supplier"""
     org_id = get_current_organisation_id()
@@ -77,6 +80,7 @@ def create_supplier():
 
 @suppliers_bp.route("/<int:id>", methods=["PUT"])
 @require_role("admin", "procurement_officer")
+@limiter.limit("20 per minute")
 def update_supplier(id):
     """Update an existing supplier"""
     org_id = get_current_organisation_id()
@@ -124,6 +128,7 @@ def update_supplier(id):
 
 @suppliers_bp.route("/<int:id>", methods=["DELETE"])
 @require_role("admin", "procurement_officer")
+@limiter.limit("10 per minute")
 def delete_supplier(id):
     """Deactivate a supplier"""
     org_id = get_current_organisation_id()

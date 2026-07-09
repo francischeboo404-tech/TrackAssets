@@ -45,6 +45,7 @@ class AuditService:
         details=None,
         user_id=None,
         organisation_id=None,
+        warehouse_id=None,
         module=None,
         session=None,
         commit=False,
@@ -52,6 +53,7 @@ class AuditService:
         """Log an action to the audit trail.
 
         Parameters:
+        - warehouse_id: optional FK to warehouses for per-warehouse filtering
         - session: optional SQLAlchemy session to use (defaults to db.session)
         - commit: if True, call session.commit() after adding (use sparingly)
         """
@@ -112,6 +114,7 @@ class AuditService:
             audit_log = inventory.AuditLog(
                 organisation_id=organisation_id,
                 user_id=user_id,
+                warehouse_id=warehouse_id,
                 action=action,
                 entity_type=entity_type,
                 entity_id=entity_id,

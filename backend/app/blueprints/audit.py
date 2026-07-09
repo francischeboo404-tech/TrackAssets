@@ -33,6 +33,7 @@ def get_audit_logs():
     action = request.args.get("action")
     q = request.args.get("q")
     user_id = request.args.get("user_id", type=int)
+    warehouse_id = request.args.get("warehouse_id", type=int)
     date_from = request.args.get("date_from")
     date_to = request.args.get("date_to")
 
@@ -41,6 +42,8 @@ def get_audit_logs():
     query = inventory.AuditLog.query.filter_by(organisation_id=org_id)
     query = query.outerjoin(User, inventory.AuditLog.user_id == User.id)
 
+    if warehouse_id:
+        query = query.filter(inventory.AuditLog.warehouse_id == warehouse_id)
     if entity_type:
         query = query.filter(inventory.AuditLog.entity_type == entity_type)
     if action:
@@ -87,6 +90,7 @@ def get_audit_logs():
                         "entity_type": log.entity_type,
                         "entity_id": log.entity_id,
                         "user_id": log.user_id,
+                        "warehouse_id": log.warehouse_id,
                         "details": log.details,
                         "ip_address": log.ip_address,
                         "created_at": log.created_at.isoformat(),

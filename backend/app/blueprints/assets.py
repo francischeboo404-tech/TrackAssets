@@ -54,6 +54,7 @@ def get_assets():
     status = request.args.get("status")
     department_id = request.args.get("department_id", type=int)
     search = request.args.get("search")
+    warehouse_id = request.args.get("warehouse_id", type=int)
 
     assets = asset_service.list_assets(
         org_id,
@@ -62,6 +63,7 @@ def get_assets():
         status=status,
         department_id=department_id,
         search=search,
+        warehouse_id=warehouse_id,
     )
 
     return (

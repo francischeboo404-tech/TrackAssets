@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { Warehouse as WarehouseIcon, Box, ArrowRightLeft, Thermometer, Percent, Info, ArrowRight, Edit2, Trash2, Loader2, Save } from 'lucide-react';
-import { useWarehouses, useDeleteWarehouse, useWarehouseBins, useUpdateBin, useDeleteBin } from '../hooks/useWarehouses';
+import { Warehouse as WarehouseIcon, Box, ArrowRightLeft, Thermometer, Percent, Info, ArrowRight, Edit2, Trash2, Loader2, Save, Globe2, Building2, Users, ShoppingCart, PackageOpen, BadgeCheck, Star } from 'lucide-react';
+import { useWarehouses, useDeleteWarehouse, useWarehouseBins, useUpdateBin, useDeleteBin, useOrgWarehouseSummary } from '../hooks/useWarehouses';
 import { BinModal } from '../components/ui/BinModal';
 import { WarehouseModal } from '../components/ui/WarehouseModal';
 import { useToast } from '../context/ToastContext';
 import { Can } from '../components/auth/Can';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useWarehouse } from '../context/WarehouseContext';
 
 const Warehouses = () => {
   const { data: utilization, isLoading } = useWarehouses();
+  const { data: orgSummary, isLoading: summaryLoading } = useOrgWarehouseSummary();
+  const { activeWarehouse, setActiveWarehouse, warehouses: contextWarehouses } = useWarehouse();
   const { mutate: deleteWarehouse, isPending: isDeleting } = useDeleteWarehouse();
   const [selectedWarehouse, setSelectedWarehouse] = useState<{id: number, name: string} | null>(null);
   const [warehouseToEdit, setWarehouseToEdit] = useState<{id: number, name: string, code: string, address?: string} | null>(null);
@@ -36,9 +39,11 @@ const Warehouses = () => {
             <div className="p-3 bg-white rounded-2xl shadow-sm border border-slate-100">
               <WarehouseIcon className="text-brand-primary w-8 h-8" />
             </div>
-            Warehouses
+            All Warehouses
           </h1>
-          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">Manage warehouse locations and bins.</p>
+          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">
+            Enterprise multi-warehouse hub &mdash; manage locations, bins, and switch active context.
+          </p>
         </div>
         <div className="flex gap-3 relative z-10">
           <Can roles={['admin']}>
@@ -61,6 +66,119 @@ const Warehouses = () => {
         </div>
       </div>
 
+      {/* ── Org-Wide KPI Summary ── */}
+      {orgSummary && (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+          {[
+            { label: 'Warehouses', value: orgSummary.total_warehouses, icon: WarehouseIcon, color: 'brand' },
+            { label: 'Inventory Value', value: `KES ${(orgSummary.total_inventory_value / 1000).toFixed(0)}K`, icon: PackageOpen, color: 'emerald' },
+            { label: 'Total Assets', value: orgSummary.total_assets, icon: Box, color: 'indigo' },
+            { label: 'Departments', value: orgSummary.total_departments, icon: Building2, color: 'amber' },
+            { label: 'Employees', value: orgSummary.total_employees, icon: Users, color: 'violet' },
+            { label: 'Pending PRs', value: orgSummary.pending_purchase_requests, icon: ShoppingCart, color: 'rose' },
+          ].map((kpi) => (
+            <div key={kpi.label} className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col gap-3 shadow-sm hover:shadow-md transition-shadow">
+              <div className={cn('p-2.5 rounded-xl w-fit', {
+                'bg-brand-primary/10': kpi.color === 'brand',
+                'bg-emerald-50': kpi.color === 'emerald',
+                'bg-indigo-50': kpi.color === 'indigo',
+                'bg-amber-50': kpi.color === 'amber',
+                'bg-violet-50': kpi.color === 'violet',
+                'bg-rose-50': kpi.color === 'rose',
+              })}>
+                <kpi.icon className={cn('w-5 h-5', {
+                  'text-brand-primary': kpi.color === 'brand',
+                  'text-emerald-600': kpi.color === 'emerald',
+                  'text-indigo-600': kpi.color === 'indigo',
+                  'text-amber-600': kpi.color === 'amber',
+                  'text-violet-600': kpi.color === 'violet',
+                  'text-rose-600': kpi.color === 'rose',
+                })} />
+              </div>
+              <div>
+                <p className="text-2xl font-black text-slate-900 tracking-tight" style={{ fontFamily: 'Outfit' }}>{kpi.value}</p>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">{kpi.label}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Per-Warehouse Overview Cards (Hub) ── */}
+      {orgSummary && orgSummary.warehouses.length > 0 && (
+        <div>
+          <h2 className="text-lg font-black text-slate-900 mb-4 tracking-tight" style={{ fontFamily: 'Outfit' }}>Warehouse Overview</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+            {orgSummary.warehouses.map((wh) => {
+              const isActive = activeWarehouse?.id === wh.id;
+              return (
+                <motion.div
+                  key={wh.id}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cn(
+                    'bg-white rounded-2xl border p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-all duration-200',
+                    isActive ? 'border-brand-primary/50 ring-2 ring-brand-primary/10' : 'border-slate-200'
+                  )}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={cn('p-2.5 rounded-xl', wh.is_main_warehouse ? 'bg-brand-primary/10' : 'bg-amber-50')}>
+                        <WarehouseIcon className={cn('w-5 h-5', wh.is_main_warehouse ? 'text-brand-primary' : 'text-amber-600')} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-slate-900 text-base leading-none">{wh.name}</h3>
+                          {wh.is_main_warehouse && <span className="text-[9px] font-black uppercase tracking-wider bg-brand-primary/10 text-brand-primary px-1.5 py-0.5 rounded-md">HQ</span>}
+                        </div>
+                        <p className="text-[10px] font-mono text-slate-400 mt-1">{wh.code}</p>
+                      </div>
+                    </div>
+                    {isActive && <BadgeCheck className="w-5 h-5 text-brand-primary shrink-0" />}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Stock Units</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{wh.stock_units.toLocaleString()}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Assets</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{wh.asset_count}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Departments</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{wh.department_count}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-xl p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Bin Usage</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">{wh.utilization_percentage.toFixed(0)}%</p>
+                    </div>
+                  </div>
+
+                  <button
+                    id={`hub-switch-warehouse-${wh.id}`}
+                    onClick={() => {
+                      const ctx = contextWarehouses.find(c => c.id === wh.id);
+                      if (ctx) setActiveWarehouse(isActive ? null : ctx);
+                    }}
+                    className={cn(
+                      'w-full py-2.5 rounded-xl text-sm font-bold transition-all duration-200 border',
+                      isActive
+                        ? 'bg-brand-primary text-white border-brand-primary hover:bg-brand-700'
+                        : 'bg-white border-slate-200 text-slate-700 hover:border-brand-primary/50 hover:text-brand-primary'
+                    )}
+                  >
+                    {isActive ? 'Active — Click to reset' : 'Set as Active Warehouse'}
+                  </button>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Existing Bin Management Section ── */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 relative z-10">
         {isLoading ? (
           [1, 2].map(i => <div key={i} className="glass-card h-80 animate-pulse bg-slate-50/50" />)

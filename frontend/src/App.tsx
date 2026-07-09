@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider } from "./context/AuthContext";
 import { ToastProvider } from "./context/ToastContext";
+import { WarehouseProvider } from "./context/WarehouseContext";
 import { LayoutShell } from "./components/layout/LayoutShell";
 import { ProtectedRoute } from "./components/layout/ProtectedRoute";
 import { ToastContainer } from "./components/ui/ToastContainer";
@@ -11,6 +12,7 @@ import { Suspense, lazy } from "react";
 
 // Pages
 const Login = lazy(() => import("./pages/Login"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Register = lazy(() => import("./pages/Register"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Inventory = lazy(() => import("./pages/Inventory"));
@@ -35,16 +37,27 @@ const Employees = lazy(() => import("./pages/Employees"));
 const EmployeeDetails = lazy(() => import("./pages/EmployeeDetails"));
 const IssueReturn = lazy(() => import("./pages/IssueReturn"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 minutes (prevents aggressive refetching)
+      gcTime: 10 * 60 * 1000,   // 10 minutes cache garbage collection
+      retry: 1,                 // Retry failed queries once
+      refetchOnWindowFocus: false, // Don't refetch every time the user switches tabs
+    },
+  },
+});
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <ToastProvider>
-          <LiveTrackingProvider>
-            <AppContent />
-          </LiveTrackingProvider>
+          <WarehouseProvider>
+            <LiveTrackingProvider>
+              <AppContent />
+            </LiveTrackingProvider>
+          </WarehouseProvider>
         </ToastProvider>
       </AuthProvider>
     </QueryClientProvider>

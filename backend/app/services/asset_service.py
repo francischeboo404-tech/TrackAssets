@@ -25,6 +25,7 @@ class AssetService:
         status=None,
         department_id=None,
         search=None,
+        warehouse_id=None,
     ):
         return self.repo.list_assets(
             org_id,
@@ -33,6 +34,7 @@ class AssetService:
             status=status,
             department_id=department_id,
             search=search,
+            warehouse_id=warehouse_id,
         )
 
     def get_asset(self, asset_id, org_id):

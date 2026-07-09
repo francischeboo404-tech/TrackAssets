@@ -31,6 +31,7 @@ import type { UserRole } from '../types';
 import { cn } from '../lib/utils';
 import { checkRechartsContainers } from '../lib/chartSizeChecker';
 import { useDepartments } from '../hooks/useDepartments';
+import { useWarehouse } from '../context/WarehouseContext';
 
 type TabId = 'overview' | 'assets' | 'inventory' | 'tracking';
 
@@ -53,18 +54,21 @@ const Analytics = () => {
   const visibleTabs = TABS.filter((t) => canAccess(user?.role, t.roles));
 
   const { data: departments = [] } = useDepartments();
+  const { activeWarehouseId } = useWarehouse();
 
-  const dashboard = useDashboardReport(days, departmentId);
-  const assetsReport = useAssetsReport(days, activeTab === 'assets' || activeTab === 'overview', departmentId);
+  const dashboard = useDashboardReport(days, departmentId, activeWarehouseId);
+  const assetsReport = useAssetsReport(days, activeTab === 'assets' || activeTab === 'overview', departmentId, activeWarehouseId);
   const inventoryReport = useInventoryReport(
     days,
     activeTab === 'inventory' || activeTab === 'overview',
     departmentId,
+    activeWarehouseId,
   );
   const trackingReport = useTrackingReport(
     days,
     activeTab === 'tracking' || activeTab === 'overview',
     departmentId,
+    activeWarehouseId,
   );
 
   

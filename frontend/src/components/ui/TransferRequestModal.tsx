@@ -18,6 +18,7 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
   const [newDepartmentId, setNewDepartmentId] = useState('');
   const [fromDepartmentId, setFromDepartmentId] = useState('');
   const [newLocation, setNewLocation] = useState('');
+  const [fromWarehouseId, setFromWarehouseId] = useState('');
   const [toWarehouseId, setToWarehouseId] = useState('');
   const [toBinId, setToBinId] = useState('');
   const [comment, setComment] = useState('');
@@ -62,6 +63,7 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
       transfer_type: 'department_to_department',
       new_department_id: Number(newDepartmentId),
       from_department_id: fromDepartmentId ? Number(fromDepartmentId) : undefined,
+      from_warehouse_id: fromWarehouseId ? Number(fromWarehouseId) : undefined,
       new_location: newLocation,
       comment,
       to_warehouse_id: toWarehouseId ? Number(toWarehouseId) : undefined,
@@ -158,24 +160,47 @@ export const TransferRequestModal: React.FC<TransferRequestModalProps> = ({ isOp
 
         <div className="space-y-4">
           {itemType === 'inventory' && (
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Source Department (Optional)</label>
-              <div className="relative">
-                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                <select
-                  value={fromDepartmentId}
-                  onChange={(e) => setFromDepartmentId(e.target.value)}
-                  className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
-                >
-                  <option value="">Select Source Department...</option>
-                  {departments?.map((dept: any) => (
-                    <option key={dept.id} value={dept.id}>
-                      {dept.name} ({dept.code})
-                    </option>
-                  ))}
-                </select>
+            <>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Source Department (Optional)</label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <select
+                    value={fromDepartmentId}
+                    onChange={(e) => setFromDepartmentId(e.target.value)}
+                    className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
+                  >
+                    <option value="">Select Source Department...</option>
+                    {departments?.map((dept: any) => (
+                      <option key={dept.id} value={dept.id}>
+                        {dept.name} ({dept.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Source Warehouse (Optional)</label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <select
+                    value={fromWarehouseId}
+                    onChange={(e) => setFromWarehouseId(e.target.value)}
+                    className="w-full bg-white border border-slate-200 text-slate-900 rounded-xl py-2.5 pl-10 pr-4 focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-all outline-none appearance-none"
+                  >
+                    <option value="">Select Source Warehouse...</option>
+                    {warehouses?.map((wh: any) => (
+                      <option key={wh.id || wh.warehouse_id} value={wh.id || wh.warehouse_id}>
+                        {wh.name || wh.warehouse_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Use this when the inventory transfer should originate from a specific warehouse source.
+                </p>
+              </div>
+            </>
           )}
 
           <div>

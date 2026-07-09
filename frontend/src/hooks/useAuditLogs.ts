@@ -8,6 +8,7 @@ export interface AuditLogParams {
   entity_type?: string;
   q?: string;
   user_id?: number;
+  warehouse_id?: number;
   date_from?: string;
   date_to?: string;
 }

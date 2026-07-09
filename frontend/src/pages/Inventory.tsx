@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Package, Search, Plus, Minus, MoreVertical, Filter, AlertCircle, QrCode, ArrowUpRight, ArrowRightLeft, Upload } from 'lucide-react';
 import { useInventory } from '../hooks/useInventory';
 import { useDepartments } from '../hooks/useDepartments';
+import { useWarehouse } from '../context/WarehouseContext';
 import { cn } from '../lib/utils';
 import { StockAdjustmentModal } from '../components/ui/StockAdjustmentModal';
 import { useToast } from '../context/ToastContext';
@@ -40,6 +41,9 @@ const Inventory = () => {
   const [page, setPage] = useState(1);
   const [departmentId, setDepartmentId] = useState<number | undefined>(undefined);
 
+  // Global warehouse context — auto-scopes all queries
+  const { activeWarehouseId } = useWarehouse();
+
   useEffect(() => {
     const q = searchParams.get('q');
     if (q) setSearch(q);
@@ -47,12 +51,17 @@ const Inventory = () => {
   const { addToast } = useToast();
   const deleteItem = useDeleteInventoryItem();
   
-  const { data, isLoading } = useInventory({ search: search || undefined, page, department_id: departmentId });
+  const { data, isLoading } = useInventory({
+    search: search || undefined,
+    page,
+    department_id: departmentId,
+    ...(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {}),
+  });
   const items = (data as any)?.inventory || [];
   const pagination = (data as any)?.pagination;
   const { user } = useAuth();
 
-  const { data: departments } = useDepartments();
+  const { data: departments } = useDepartments(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {});
 
   const openAdjustment = (item: any, type: 'IN' | 'OUT') => {
     setSelectedItem(item);

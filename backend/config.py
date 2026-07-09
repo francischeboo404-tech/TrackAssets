@@ -141,6 +141,35 @@ class Config:
     _db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URL_PROD")
     SQLALCHEMY_ENGINE_OPTIONS = _postgres_engine_options(_db_url)
 
+    # -------------------------------------------------------
+    # Flask-Mail (password-reset emails)
+    # Set MAIL_SERVER, MAIL_USERNAME, MAIL_PASSWORD in env.
+    # Example: Gmail SMTP with app password.
+    # -------------------------------------------------------
+    MAIL_SERVER = os.environ.get("MAIL_SERVER", "smtp.gmail.com")
+    MAIL_PORT = int(os.environ.get("MAIL_PORT", "587"))
+    MAIL_USE_TLS = os.environ.get("MAIL_USE_TLS", "true").lower() == "true"
+    MAIL_USE_SSL = os.environ.get("MAIL_USE_SSL", "false").lower() == "true"
+    MAIL_USERNAME = os.environ.get("MAIL_USERNAME")
+    MAIL_PASSWORD = os.environ.get("MAIL_PASSWORD")
+    MAIL_DEFAULT_SENDER = os.environ.get("MAIL_DEFAULT_SENDER", "noreply@trackit.app")
+
+    # Frontend base URL for password-reset links
+    FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5173")
+
+    # Password reset token TTL — 1 minute (60 seconds) as required
+    PASSWORD_RESET_TOKEN_TTL_SECONDS = int(
+        os.environ.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", "60")
+    )
+
+    # -------------------------------------------------------
+    # Alert channels (optional — leave unset to disable)
+    # -------------------------------------------------------
+    # Slack incoming webhook URL:
+    SLACK_ALERT_WEBHOOK_URL = os.environ.get("SLACK_ALERT_WEBHOOK_URL")
+    # Comma-separated email recipients for critical alerts:
+    ALERT_EMAIL_TO = os.environ.get("ALERT_EMAIL_TO")
+
 
 
 class DevelopmentConfig(Config):
@@ -211,6 +240,7 @@ class TestingConfig(Config):
 
     TESTING = True
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
+    SQLALCHEMY_ENGINE_OPTIONS = {"pool_pre_ping": True}  # Use pool_pre_ping only, no PostgreSQL-specific options
     WTF_CSRF_ENABLED = False
     JWT_TOKEN_LOCATION = ["headers", "cookies"]
     SECRET_KEY = os.environ.get("SECRET_KEY") or "test-secret-key"

@@ -19,6 +19,13 @@ declare module 'axios' {
 // when running locally target the Flask backend directly, on Vercel use the
 // known Render backend, otherwise use Vite's local '/api' proxy.
 const resolvedBase = (() => {
+  // In development use relative path so Vite proxy handles /api forwarding reliably
+  // This avoids direct absolute calls which can bypass the dev server proxy or be cached
+  // by service workers during local development.
+  if (import.meta.env.DEV) {
+    return '';
+  }
+
   const envBase = import.meta.env.VITE_API_URL;
   if (envBase) {
     return envBase;
@@ -41,6 +48,14 @@ export const baseWithApi = (() => {
     return resolvedBase;
   }
 })();
+
+// Debug: print resolved base to help diagnose 404 issues during development
+try {
+  // eslint-disable-next-line no-console
+  console.debug('API base resolved to:', baseWithApi);
+} catch (e) {
+  // ignore in non-browser contexts
+}
 
 const api = axios.create({
   baseURL: baseWithApi,

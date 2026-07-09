@@ -28,7 +28,7 @@ class InventoryService:
         self.session = session or db.session
 
     def list_items(
-        self, org_id, page=1, per_page=50, search=None, low_stock_only=False, department_id=None
+        self, org_id, page=1, per_page=50, search=None, low_stock_only=False, department_id=None, warehouse_id=None
     ):
         return self.repo.list_items(
             org_id,
@@ -37,6 +37,7 @@ class InventoryService:
             search=search,
             low_stock_only=low_stock_only,
             department_id=department_id,
+            warehouse_id=warehouse_id,
         )
 
     def get_item(self, item_id, org_id):
@@ -404,16 +405,37 @@ class InventoryService:
                 qty_change = quantity
 
             elif movement_type == "OUT":
+                # Validate destination != source for transfers
+                if destination_warehouse_id and destination_warehouse_id == warehouse_id:
+                    raise ValueError("Source and destination warehouse must be different")
+
                 stock_service.decrease_stock(
                     item_id=item.id,
                     org_id=org_id,
                     quantity=quantity,
                     warehouse_id=warehouse_id,
+                    destination_warehouse_id=destination_warehouse_id,
                     reference=reference,
                     notes=notes,
                     commit=False,
                 )
-                action = "STOCK_DECREASED"
+
+                # If a destination warehouse is specified, this is a transfer:
+                # atomically receive the same quantity at the destination.
+                if destination_warehouse_id:
+                    transfer_ref = f"TRANSFER-IN:{reference}" if reference else None
+                    transfer_notes = f"Transfer received from warehouse {warehouse_id}. {notes or ''}" .strip()
+                    stock_service.increase_stock(
+                        item_id=item.id,
+                        org_id=org_id,
+                        quantity=quantity,
+                        warehouse_id=destination_warehouse_id,
+                        reference=transfer_ref,
+                        notes=transfer_notes,
+                        commit=False,
+                    )
+
+                action = "STOCK_TRANSFERRED" if destination_warehouse_id else "STOCK_DECREASED"
                 qty_change = -quantity
 
             else:
@@ -450,6 +472,100 @@ class InventoryService:
             self.session.rollback()
 
             raise
+
+    @transaction_retry(max_retries=3)
+    def reserve_stock(self, item_id, org_id, quantity, warehouse_id=None, reference=None):
+        """Reserve quantity on a WarehouseStock row to prevent double allocation.
+
+        This updates `quantity_reserved` on the WarehouseStock row with a
+        row-level lock and writes an audit entry. It commits the change.
+        """
+        if quantity is None or quantity <= 0:
+            raise ValidationError("Quantity must be greater than 0")
+
+        wh = (
+            self.session.query(WarehouseStock).with_for_update()
+            .filter_by(item_id=item_id, warehouse_id=warehouse_id)
+            .first()
+        )
+        if not wh:
+            raise NotFoundError("No stock exists in the specified warehouse")
+
+        available = wh.quantity_on_hand - (wh.quantity_reserved or 0)
+        if available < quantity:
+            raise ValidationError("Insufficient available stock in the specified warehouse")
+
+        prev_reserved = wh.quantity_reserved or 0
+        wh.quantity_reserved = prev_reserved + quantity
+        self.session.flush()
+
+        AuditService.log_action(
+            action="STOCK_RESERVED",
+            entity_type="inventory_item",
+            entity_id=item_id,
+            details={
+                "warehouse_id": warehouse_id,
+                "quantity": quantity,
+                "previous_reserved": prev_reserved,
+                "new_reserved": wh.quantity_reserved,
+                "reference": reference,
+            },
+            organisation_id=org_id,
+            session=self.session,
+        )
+
+        try:
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+        return wh
+
+    @transaction_retry(max_retries=3)
+    def unreserve_stock(self, item_id, org_id, quantity, warehouse_id=None, reference=None):
+        """Remove reserved quantity from a WarehouseStock row.
+
+        Ensures reserved quantity does not go negative and writes an audit entry.
+        """
+        if quantity is None or quantity <= 0:
+            raise ValidationError("Quantity must be greater than 0")
+
+        wh = (
+            self.session.query(WarehouseStock).with_for_update()
+            .filter_by(item_id=item_id, warehouse_id=warehouse_id)
+            .first()
+        )
+        if not wh:
+            # Nothing to unreserve
+            return None
+
+        prev_reserved = wh.quantity_reserved or 0
+        wh.quantity_reserved = max(0, prev_reserved - quantity)
+        self.session.flush()
+
+        AuditService.log_action(
+            action="STOCK_UNRESERVED",
+            entity_type="inventory_item",
+            entity_id=item_id,
+            details={
+                "warehouse_id": warehouse_id,
+                "quantity": quantity,
+                "previous_reserved": prev_reserved,
+                "new_reserved": wh.quantity_reserved,
+                "reference": reference,
+            },
+            organisation_id=org_id,
+            session=self.session,
+        )
+
+        try:
+            self.session.commit()
+        except Exception:
+            self.session.rollback()
+            raise
+
+        return wh
 
 
     @transaction_retry(max_retries=3)

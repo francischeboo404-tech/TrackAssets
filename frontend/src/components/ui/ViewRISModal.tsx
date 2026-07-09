@@ -57,6 +57,7 @@ export default function ViewRISModal({ isOpen, onClose, risId }: ViewRISModalPro
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Item</th>
+                      <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Type</th>
                       <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Requested Qty</th>
                       <th className="px-4 py-3 text-xs font-bold text-emerald-600 uppercase">Issued Qty</th>
                       <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Unit Cost</th>
@@ -65,7 +66,8 @@ export default function ViewRISModal({ isOpen, onClose, risId }: ViewRISModalPro
                   <tbody className="divide-y divide-slate-100">
                     {ris.items?.map((item: any) => (
                       <tr key={item.id} className="hover:bg-slate-50 table-row">
-                        <td data-label="Item" className="table-cell px-4 py-3 text-sm font-medium text-slate-800">{item.name || `Item #${item.item_id}`}</td>
+                        <td data-label="Item" className="table-cell px-4 py-3 text-sm font-medium text-slate-800">{item.name || `Item #${item.item_id || item.asset_id}`}</td>
+                        <td data-label="Type" className="table-cell px-4 py-3 text-sm text-slate-600">{item.item_type === 'asset' ? 'Asset' : 'Inventory'}</td>
                         <td data-label="Requested Qty" className="table-cell px-4 py-3 text-sm text-slate-600">{item.quantity_requested}</td>
                         <td data-label="Issued Qty" className="table-cell px-4 py-3 text-sm font-bold text-emerald-600">{item.quantity_issued}</td>
                         <td data-label="Unit Cost" className="table-cell px-4 py-3 text-sm text-slate-600">KES {item.unit_cost?.toLocaleString() || '—'}</td>

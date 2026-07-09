@@ -20,6 +20,7 @@ import type { Department } from "../hooks/useDepartments";
 import { useUsers } from "../hooks/useUsers";
 import { Can } from "../components/auth/Can";
 import { cn } from "../lib/utils";
+import { useWarehouse } from "../context/WarehouseContext";
 
 type InventoryItemType =
   | "consumable"
@@ -367,8 +368,10 @@ const DepartmentModal = ({
 
 const Departments = () => {
   const [search, setSearch] = useState("");
+  const { activeWarehouseId } = useWarehouse();
   const { data: departments, isLoading } = useDepartments({
     search: search || undefined,
+    ...(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {}),
   });
   const deleteDept = useDeleteDepartment();
 

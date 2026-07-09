@@ -45,10 +45,15 @@ class EmployeeService:
         return emp
 
     @staticmethod
-    def list_employees(org_id: int, department_id: int=None, page: int=1, per_page: int=50, search: str=None, sort: str=None):
+    def list_employees(org_id: int, department_id: int=None, warehouse_id: int=None, page: int=1, per_page: int=50, search: str=None, sort: str=None):
         q = Employee.query.filter_by(organisation_id=org_id, is_active=True)
         if department_id:
             q = q.filter_by(department_id=department_id)
+        if warehouse_id:
+            # Join with Department to filter by warehouse
+            q = q.join(Department, Employee.department_id == Department.id).filter(
+                Department.warehouse_id == warehouse_id
+            )
         if search:
             term = f"%{search}%"
             from sqlalchemy import or_

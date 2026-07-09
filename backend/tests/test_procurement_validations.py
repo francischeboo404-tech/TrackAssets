@@ -103,6 +103,26 @@ def test_successful_po_creation(ctx):
     assert po.pr_id == pr.id
     assert float(po.total_amount) == 3 * 150.0
 
+
+def test_list_purchase_orders_can_filter_receivable_statuses(ctx):
+    org, user, supplier, item = create_base_entities()
+
+    approved_pr = ProcurementService.create_purchase_request(org.id, user.id, "Approved request", [{"item_id": item.id, "quantity": 4}])
+    ProcurementService.approve_purchase_request(approved_pr.id, user.id)
+    approved_po = ProcurementService.create_purchase_order(org.id, approved_pr.id, supplier.id, [{"item_id": item.id, "quantity": 2, "unit_cost": 120.0}])
+    ProcurementService.approve_purchase_order(approved_po.id, user.id)
+
+    pending_pr = ProcurementService.create_purchase_request(org.id, user.id, "Pending request", [{"item_id": item.id, "quantity": 4}])
+    ProcurementService.approve_purchase_request(pending_pr.id, user.id)
+    ProcurementService.create_purchase_order(org.id, pending_pr.id, supplier.id, [{"item_id": item.id, "quantity": 2, "unit_cost": 100.0}])
+
+    receivable_pos = ProcurementService.list_purchase_orders(org.id, statuses=["approved", "partially_received", "received"])
+
+    assert len(receivable_pos) == 1
+    assert receivable_pos[0].id == approved_po.id
+    assert receivable_pos[0].status == "approved"
+
+
 def test_po_item_exceeds_pr_quantity(ctx):
     org, user, supplier, item = create_base_entities()
     pr = ProcurementService.create_purchase_request(org.id, user.id, "Need small amount", [{"item_id": item.id, "quantity": 2}])

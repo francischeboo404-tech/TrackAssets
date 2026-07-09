@@ -1,6 +1,7 @@
 from app import db
 from app.models.kenya_gov_models import RequisitionSlip, RequisitionItem
 from app.models.inventory import InventoryItem, StockMovement, StockMovementType
+from app.models.asset import Asset
 from app.models.location_topology import WarehouseBin, WarehouseShelf, WarehouseRack, WarehouseZone
 from app.models.stock_levels import WarehouseStock
 from app.models.item_instance import ItemInstance
@@ -11,6 +12,13 @@ from app.db_utils import transaction_retry
 from datetime import datetime, timezone
 
 class RequisitionService:
+    @staticmethod
+    def _normalize_requisition_item_type(item_data):
+        item_type = (item_data.get('item_type') or 'inventory').strip().lower()
+        if item_type not in {'inventory', 'asset'}:
+            raise ValidationError("Item type must be either 'inventory' or 'asset'")
+        return item_type
+
     @staticmethod
     @transaction_retry(max_retries=3)
     def create_requisition(org_id, requester_id, items_data):
@@ -27,14 +35,31 @@ class RequisitionService:
         db.session.flush()
         
         for item_data in items_data:
-            item = db.session.get(InventoryItem, int(item_data['item_id']))
+            item_type = RequisitionService._normalize_requisition_item_type(item_data)
+            item_id = None
+            asset_id = None
+            if item_type == 'inventory':
+                item_id = int(item_data['item_id'])
+                item = db.session.get(InventoryItem, item_id)
+                if not item or item.organisation_id != org_id:
+                    raise ValidationError(f"Inventory item {item_id} not found")
+                unit_cost = item_data.get('unit_cost') if item_data.get('unit_cost') is not None else (item.unit_price if item else 0)
+            else:
+                asset_id = int(item_data['asset_id'])
+                asset = db.session.get(Asset, asset_id)
+                if not asset or asset.organisation_id != org_id:
+                    raise ValidationError(f"Asset {asset_id} not found")
+                unit_cost = item_data.get('unit_cost', 0)
+
             req_item = RequisitionItem(
                 organization_id=org_id,
                 ris_id=ris.id,
-                item_id=item_data['item_id'],
+                item_id=item_id,
+                asset_id=asset_id,
+                item_type=item_type,
                 quantity_requested=item_data['quantity'],
                 quantity_issued=item_data.get('quantity_issued', 0),
-                unit_cost=item_data.get('unit_cost') if item_data.get('unit_cost') is not None else (item.unit_price if item else 0),
+                unit_cost=unit_cost,
                 warehouse_id=item_data.get('warehouse_id'),
                 bin_id=item_data.get('bin_id'),
             )
@@ -183,6 +208,13 @@ class RequisitionService:
         total_issued = 0
 
         for r_item in req_items:
+            if r_item.item_type == 'asset':
+                requested = int(r_item.quantity_requested or 0)
+                total_requested += requested
+                r_item.quantity_issued = requested
+                total_issued += requested
+                continue
+
             item = db.session.get(InventoryItem, r_item.item_id)
             if not item:
                 raise ValueError(f"Item {r_item.item_id} not found")

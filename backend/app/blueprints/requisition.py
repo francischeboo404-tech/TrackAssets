@@ -5,6 +5,7 @@ from app.errors import AuthorizationError
 from app.services.requisition_service import RequisitionService
 from app.models.kenya_gov_models import RequisitionSlip, RequisitionItem
 from app.models.inventory import InventoryItem
+from app.models.asset import Asset
 
 requisition_bp = Blueprint('requisition_bp', __name__)
 
@@ -78,12 +79,21 @@ def get_ris(id):
     req_items = RequisitionItem.query.filter_by(ris_id=id).all()
     items = []
     for ri in req_items:
-        inv = db.session.get(InventoryItem, ri.item_id)
+        if ri.item_type == 'asset':
+            asset = db.session.get(Asset, ri.asset_id)
+            item_name = getattr(asset, 'name', None)
+            item_sku = getattr(asset, 'asset_code', None)
+        else:
+            inv = db.session.get(InventoryItem, ri.item_id)
+            item_name = getattr(inv, 'name', None)
+            item_sku = getattr(inv, 'sku', None)
         items.append({
             'id': ri.id,
             'item_id': ri.item_id,
-            'sku': getattr(inv, 'sku', None),
-            'name': getattr(inv, 'name', None),
+            'asset_id': ri.asset_id,
+            'item_type': ri.item_type or 'inventory',
+            'sku': item_sku,
+            'name': item_name,
             'quantity_requested': int(ri.quantity_requested or 0),
             'quantity_issued': int(ri.quantity_issued or 0),
             'unit_cost': float(ri.unit_cost) if ri.unit_cost is not None else None,
@@ -125,6 +135,8 @@ def list_ris():
         for ri in req_items:
             r_items.append({
                 'item_id': ri.item_id,
+                'asset_id': ri.asset_id,
+                'item_type': ri.item_type or 'inventory',
                 'quantity_requested': int(ri.quantity_requested or 0),
                 'quantity_issued': int(ri.quantity_issued or 0),
                 'unit_cost': float(ri.unit_cost) if ri.unit_cost is not None else 0.0,

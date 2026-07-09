@@ -25,39 +25,14 @@ class TransferService:
             raise ValidationError("Cannot transfer a disposed asset")
 
         # Ensure no pending request for this asset
-        existing = transfer_req = transfer_req = (
-            self.session.query(
-                db.exists().where(
-                    db.and_(
-                        db.literal_column("transfer_requests.asset_id")
-                        == asset_obj.id,
-                        db.literal_column("transfer_requests.status")
-                        == "pending",
-                    )
-                )
-            ).scalar()
-            if False
-            else None
-        )
-
-        # Simpler check using ORM
+        from app.models.transfer import TransferRequest
         existing_request = (
-            self.session.query(
-                db.exists().where(
-                    db.and_(
-                        db.literal_column("transfer_requests.asset_id")
-                        == asset_obj.id,
-                        db.literal_column("transfer_requests.status")
-                        == "pending",
-                    )
-                )
-            ).scalar()
-            if False
-            else None
+            self.session.query(TransferRequest)
+            .filter_by(asset_id=asset_obj.id, status="pending")
+            .first()
         )
-
-        # We'll use repository-level check by searching for pending requests
-        self.session.query(type(asset_obj)).session.query if False else None
+        if existing_request:
+            raise ValidationError("A pending transfer request already exists for this asset")
 
         # Create request straightforwardly (controllers previously checked department)
         try:

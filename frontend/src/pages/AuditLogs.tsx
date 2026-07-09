@@ -4,11 +4,16 @@ import { downloadAuthenticatedFile } from '../lib/download';
 import { useToast } from '../context/ToastContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuditLogs } from '../hooks/useAuditLogs';
+import { useWarehouse } from '../context/WarehouseContext';
 import { cn } from '../lib/utils';
 
 const AuditLogs = () => {
   const [search, setSearch] = useState('');
-  const { data: logs, isLoading } = useAuditLogs({ q: search || undefined });
+  const { activeWarehouseId } = useWarehouse();
+  const { data: logs, isLoading } = useAuditLogs({
+    q: search || undefined,
+    ...(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {}),
+  });
   const [selectedLog, setSelectedLog] = useState<any | null>(null);
   const [exporting, setExporting] = useState(false);
   const { addToast } = useToast();

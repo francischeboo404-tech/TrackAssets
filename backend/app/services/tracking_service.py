@@ -2,6 +2,7 @@ import hashlib
 from datetime import datetime, timedelta
 
 from flask import current_app
+from sqlalchemy.orm import lazyload, noload
 
 from app import db
 from app.audit_service import AuditService
@@ -86,7 +87,7 @@ class TrackingService:
                 )
             if entity_type == "asset":
                 item = (
-                    Asset.query.with_for_update()
+                    Asset.query.options(lazyload(Asset.assigned_user)).with_for_update()
                     .filter_by(id=entity_id, organisation_id=org_id)
                     .first()
                 )
@@ -112,7 +113,7 @@ class TrackingService:
                 if len(parts) >= 3 and int(parts[1]) == org_id:
                     asset_code = parts[2]
                     item = (
-                        Asset.query.with_for_update()
+                        Asset.query.options(lazyload(Asset.assigned_user)).with_for_update()
                         .filter_by(
                             organisation_id=org_id, asset_code=asset_code
                         )
@@ -123,7 +124,7 @@ class TrackingService:
 
         # Stored scan URL / token match (still requires prior signature at creation)
         asset_obj = (
-            Asset.query.with_for_update()
+            Asset.query.options(lazyload(Asset.assigned_user)).with_for_update()
             .filter(
                 Asset.organisation_id == org_id,
                 db.or_(
@@ -156,6 +157,7 @@ class TrackingService:
         instance = (
             ItemInstance.query.with_for_update()
             .join(InventoryItem)
+            .options(noload(ItemInstance.warehouse), noload(ItemInstance.bin))
             .filter(
                 InventoryItem.organisation_id == org_id,
                 db.or_(
@@ -167,6 +169,23 @@ class TrackingService:
         )
         if instance:
             return instance, "inventory_instance"
+
+        # Fallback: allow plain asset codes or inventory SKUs printed on stickers
+        # Some printed labels may contain only the asset code or SKU without a signed token.
+        from app.models.asset import Asset as _Asset
+        from app.models.inventory import InventoryItem as _InventoryItem
+
+        plain_asset = (
+            _Asset.query.filter_by(organisation_id=org_id, asset_code=qr_data).first()
+        )
+        if plain_asset:
+            return plain_asset, "asset"
+
+        plain_inventory = (
+            _InventoryItem.query.filter_by(organisation_id=org_id, sku=qr_data).first()
+        )
+        if plain_inventory:
+            return plain_inventory, "inventory"
 
         raise NotFoundError("No item found matching this QR code")
 

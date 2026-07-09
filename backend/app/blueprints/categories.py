@@ -1,13 +1,15 @@
 from flask import Blueprint, jsonify, request
-from app import db
+from app import db, limiter
 from app.auth_utils import get_current_organisation_id, jwt_required_with_user
 from app.models.kenya_gov_models import Category
 
 categories_bp = Blueprint("categories", __name__)
 
 
+
 @categories_bp.route("", methods=["POST"])
 @jwt_required_with_user
+@limiter.limit("20 per minute")
 def create_category():
     org_id = get_current_organisation_id()
     payload = request.get_json(silent=True) or {}
@@ -43,6 +45,7 @@ def create_category():
 
 @categories_bp.route("", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("100 per minute")
 def list_categories():
     org_id = get_current_organisation_id()
     categories = Category.query.filter_by(organization_id=org_id, is_active=True).all()

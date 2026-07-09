@@ -9,6 +9,12 @@ export interface TransferRequest {
   asset_name: string;
   from_department_name: string;
   to_department_name: string;
+  from_warehouse_id?: number;
+  from_warehouse_name?: string;
+  to_warehouse_id?: number;
+  to_warehouse_name?: string;
+  from_warehouse_reserved_quantity?: number;
+  reservation_status?: string;
   from_user_id?: number;
   from_user_name?: string;
   to_user_id?: number;
@@ -33,13 +39,14 @@ export interface TransferRequestPayload {
   comment?: string;
 }
 
-export const useTransferRequests = (status: 'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected' = 'pending', page = 1, search?: string, departmentId?: number) => {
+export const useTransferRequests = (status: 'all' | 'pending' | 'approved' | 'in_transit' | 'completed' | 'rejected' = 'pending', page = 1, search?: string, departmentId?: number, warehouseId?: number) => {
   return useQuery({
-    queryKey: ['transfer-requests', status, page, search, departmentId],
+    queryKey: ['transfer-requests', status, page, search, departmentId, warehouseId],
     queryFn: async () => {
       const params: any = { status, page };
       if (search) params.search = search;
       if (departmentId) params.department_id = departmentId;
+      if (warehouseId) params.warehouse_id = warehouseId;
       const response = await api.get<{ transfer_requests: TransferRequest[], pagination: any }>('/transfers/requests', {
         params
       });

@@ -1,5 +1,5 @@
 from flask import Blueprint, g, jsonify, request
-from app import db
+from app import db, limiter
 from app.auth_utils import (
     jwt_required_with_user,
     get_current_organisation_id,
@@ -19,6 +19,7 @@ users_bp = Blueprint("users", __name__)
 @users_bp.route("", methods=["POST"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("20 per minute")
 def create_user():
     """Create a new user within the organization (Admin only)"""
     data = request.get_json()
@@ -88,6 +89,7 @@ def create_user():
 @users_bp.route("", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("100 per minute")
 def get_users():
     """List all users in the organization (Admin only)"""
     org_id = get_current_organisation_id()
@@ -154,19 +156,17 @@ def get_users():
 @users_bp.route("/<int:user_id>/role", methods=["PUT"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("20 per minute")
 def update_user_role(user_id):
     """Update a user's role"""
-    data = request.get_json()
+    data = request.get_json() or {}
     new_role = data.get("role")
     org_id = get_current_organisation_id()
 
-    if new_role not in [
-        "admin",
-        "staff",
-        "dept_head",
-        "store_manager",
-    ]:
-        raise ValidationError("Invalid role")
+    valid_roles = ["admin", "staff", "dept_head", "store_manager", "logistics_officer",
+                   "procurement_officer", "employee", "auditor"]
+    if new_role not in valid_roles:
+        raise ValidationError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
 
     user_obj = User.query.filter_by(id=user_id, organisation_id=org_id).first()
     if not user_obj:
@@ -190,11 +190,15 @@ def update_user_role(user_id):
 @users_bp.route("/<int:user_id>/status", methods=["PUT"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("20 per minute")
 def toggle_user_status(user_id):
     """Deactivate/Activate a user"""
-    data = request.get_json()
+    data = request.get_json() or {}
     is_active = data.get("is_active")
     org_id = get_current_organisation_id()
+
+    if not isinstance(is_active, bool):
+        raise ValidationError("'is_active' must be a boolean value (true or false)")
 
     user_obj = User.query.filter_by(id=user_id, organisation_id=org_id).first()
     if not user_obj:

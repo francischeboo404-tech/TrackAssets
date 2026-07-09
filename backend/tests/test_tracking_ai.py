@@ -87,6 +87,27 @@ class TestTrackingAI(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event.warehouse_id, self.wh1.id)
 
+    def test_record_scan_legacy_asset_qr_token(self):
+        """Test that legacy signed asset QR tokens still resolve and record scans."""
+        payload = QRService.get_qr_payload(self.org_id, "asset", self.asset.id)
+        legacy_token = payload["legacy_token"]
+
+        TrackingService.record_scan(
+            org_id=self.org_id,
+            user_id=self.user_id,
+            user_role="staff",
+            qr_data=legacy_token,
+            action_type="CHECK_IN",
+            warehouse_id=self.wh1.id,
+        )
+
+        db.session.refresh(self.asset)
+        self.assertEqual(self.asset.location, "WH: Warehouse A")
+
+        event = ScanEvent.query.filter_by(item_id=self.asset.id).first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.warehouse_id, self.wh1.id)
+
     def test_impossible_travel_anomaly(self):
         """Test detection of scans too close in time for different locations."""
         # First scan

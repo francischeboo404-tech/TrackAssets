@@ -103,15 +103,18 @@ class ReportAnalyticsService:
         org_id: int,
         days: int = 30,
         department_name: str | None = None,
+        warehouse_id: int | None = None,
     ) -> dict:
         days = _parse_days(days)
-        scope = department_name or "org"
+        scope = f"wh:{warehouse_id}:" + (department_name or "org")
         key = _cache_key(org_id, "assets", days, scope)
         cached = _cache_get(key)
         if cached:
             return cached
 
         base = Asset.query.filter(Asset.organisation_id == org_id)
+        if warehouse_id:
+            base = base.filter(Asset.warehouse_id == warehouse_id)
         base = _department_asset_filter(base, department_name)
 
         total_count = base.count()
@@ -120,6 +123,8 @@ class ReportAnalyticsService:
             db.session.query(Asset.status, func.count(Asset.id))
             .filter(Asset.organisation_id == org_id)
         )
+        if warehouse_id:
+            status_rows = status_rows.filter(Asset.warehouse_id == warehouse_id)
         if department_name:
             from app.models.organization import Department
 
@@ -150,6 +155,11 @@ class ReportAnalyticsService:
             db.session.query(Department.name, func.count(Asset.id))
             .join(Asset, Asset.department_id == Department.id)
             .filter(Asset.organisation_id == org_id)
+        )
+        if warehouse_id:
+            dept_rows = dept_rows.filter(Asset.warehouse_id == warehouse_id)
+        dept_rows = (
+            dept_rows
             .group_by(Department.name)
             .order_by(func.count(Asset.id).desc())
             .all()
@@ -261,9 +271,9 @@ class ReportAnalyticsService:
         return payload
 
     @staticmethod
-    def get_inventory_report(org_id: int, days: int = 30, department_id: int | None = None) -> dict:
+    def get_inventory_report(org_id: int, days: int = 30, department_id: int | None = None, warehouse_id: int | None = None) -> dict:
         days = _parse_days(days)
-        scope = f"dept:{department_id}" if department_id else "org"
+        scope = f"wh:{warehouse_id}:dept:{department_id}" if (warehouse_id or department_id) else "org"
         key = _cache_key(org_id, "inventory", days, scope)
         cached = _cache_get(key)
         if cached:
@@ -273,13 +283,15 @@ class ReportAnalyticsService:
             organisation_id=org_id, is_active=True
         )
 
-        # If department scoped, attempt to resolve department warehouse scope
-        dept_warehouse_id = None
-        if department_id:
+        # Resolve effective warehouse_id: explicit param takes priority, else infer from dept
+        effective_warehouse_id = warehouse_id
+        if not effective_warehouse_id and department_id:
             from app.models.organization import Department
             dept = Department.query.filter_by(id=department_id, organisation_id=org_id, is_active=True).first()
             if dept and dept.warehouse_id:
-                dept_warehouse_id = dept.warehouse_id
+                effective_warehouse_id = dept.warehouse_id
+
+        dept_warehouse_id = effective_warehouse_id  # backward-compat alias
 
         total_skus = inv_base.count()
 
@@ -294,8 +306,8 @@ class ReportAnalyticsService:
                 InventoryItem.is_active == True,
             )
         )
-        if dept_warehouse_id:
-            stock_query = stock_query.filter(WarehouseStock.warehouse_id == dept_warehouse_id)
+        if effective_warehouse_id:
+            stock_query = stock_query.filter(WarehouseStock.warehouse_id == effective_warehouse_id)
 
         current_stock = {row.item_id: int(row.total_qty or 0) for row in stock_query.group_by(WarehouseStock.item_id).all()}
 
@@ -504,9 +516,9 @@ class ReportAnalyticsService:
         return payload
 
     @staticmethod
-    def get_tracking_report(org_id: int, days: int = 30, department_id: int | None = None) -> dict:
+    def get_tracking_report(org_id: int, days: int = 30, department_id: int | None = None, warehouse_id: int | None = None) -> dict:
         days = _parse_days(days)
-        scope = f"dept:{department_id}" if department_id else "org"
+        scope = f"wh:{warehouse_id}:dept:{department_id}" if (warehouse_id or department_id) else "org"
         key = _cache_key(org_id, "tracking", days, scope)
         cached = _cache_get(key)
         if cached:
@@ -517,17 +529,19 @@ class ReportAnalyticsService:
         from app.models.inventory import AuditLog
         from app.models.user import User
 
-        # If department scoped, try to limit by department warehouse
-        dept_warehouse_id = None
-        if department_id:
+        # Resolve effective warehouse_id: explicit param takes priority, else infer from dept
+        effective_warehouse_id = warehouse_id
+        if not effective_warehouse_id and department_id:
             from app.models.organization import Department
             dept = Department.query.filter_by(id=department_id, organisation_id=org_id, is_active=True).first()
             if dept and dept.warehouse_id:
-                dept_warehouse_id = dept.warehouse_id
+                effective_warehouse_id = dept.warehouse_id
+
+        dept_warehouse_id = effective_warehouse_id  # backward-compat alias
 
         scan_filter = [ScanEvent.organisation_id == org_id, ScanEvent.timestamp >= threshold]
-        if dept_warehouse_id:
-            scan_filter.append(ScanEvent.warehouse_id == dept_warehouse_id)
+        if effective_warehouse_id:
+            scan_filter.append(ScanEvent.warehouse_id == effective_warehouse_id)
 
         total_scans = (
             ScanEvent.query.filter(*scan_filter).count()
@@ -633,16 +647,17 @@ class ReportAnalyticsService:
         org_id: int,
         days: int = 30,
         department_name: str | None = None,
+        warehouse_id: int | None = None,
     ) -> dict:
         days = _parse_days(days)
-        scope = department_name or "org"
+        scope = f"wh:{warehouse_id}:" + (department_name or "org")
         key = _cache_key(org_id, "dashboard", days, scope)
         cached = _cache_get(key)
         if cached:
             return cached
 
         assets = ReportAnalyticsService.get_assets_report(
-            org_id, days, department_name
+            org_id, days, department_name, warehouse_id
         )
         # if department_name provided, attempt to resolve department id for inventory/tracking scoping
         dept_id = None
@@ -652,8 +667,8 @@ class ReportAnalyticsService:
             if dept:
                 dept_id = dept.id
 
-        inventory = ReportAnalyticsService.get_inventory_report(org_id, days, department_id=dept_id)
-        tracking = ReportAnalyticsService.get_tracking_report(org_id, days, department_id=dept_id)
+        inventory = ReportAnalyticsService.get_inventory_report(org_id, days, department_id=dept_id, warehouse_id=warehouse_id)
+        tracking = ReportAnalyticsService.get_tracking_report(org_id, days, department_id=dept_id, warehouse_id=warehouse_id)
 
         asset_summary = AnalyticsService.get_asset_summary(org_id)
         inv_summary = AnalyticsService.get_inventory_summary(org_id)

@@ -4,6 +4,7 @@ import { useCreateRequisition } from '../../hooks/useRequisitions'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { useInventory } from '../../hooks/useInventory'
+import { useAssets } from '../../hooks/useAssets'
 import { useWarehouses, useWarehouseBins } from '../../hooks/useWarehouses'
 import { usePurchaseRequests } from '../../hooks/useProcurement'
 import { useQueryClient } from '@tanstack/react-query'
@@ -25,6 +26,9 @@ type PickedItem = {
   unit_cost?: number
   available?: number
   bin_id?: number | null
+  item_type: 'inventory' | 'asset'
+  item_id?: number
+  asset_id?: number
 }
 
 export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
@@ -34,6 +38,7 @@ export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [submitting, setSubmitting] = useState(false)
   const [warehouseId, setWarehouseId] = useState<number | null>(null)
   const [prId, setPrId] = useState("")
+  const [itemType, setItemType] = useState<'inventory' | 'asset'>('inventory')
 
   const create = useCreateRequisition()
   const { addToast } = useToast()
@@ -52,14 +57,30 @@ export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
   // useInventory returns { inventory, pagination }
   const inventoryQuery = useInventory({ search: debounced, per_page: 10, warehouse_id: warehouseId ?? undefined })
-  const suggestions = useMemo(() => inventoryQuery.data?.inventory || [], [inventoryQuery.data])
+  const assetQuery = useAssets({ search: debounced, per_page: 10 })
+  const inventorySuggestions = useMemo(() => inventoryQuery.data?.inventory || [], [inventoryQuery.data])
+  const assetSuggestions = useMemo(() => assetQuery.data?.assets || [], [assetQuery.data])
+  const suggestions = useMemo(() => (itemType === 'asset' ? assetSuggestions : inventorySuggestions), [assetSuggestions, inventorySuggestions, itemType])
   const { data: warehousesData } = useWarehouses()
 
   const addItem = (itm: any) => {
     // avoid duplicates
-    if (selected.find((s) => s.id === itm.id)) return
+    if (selected.find((s) => s.id === itm.id && s.item_type === itemType)) return
     const available = itm.quantity_available ?? itm.quantity_on_hand ?? itm.quantity ?? 0
-    setSelected((s) => [...s, { id: itm.id, name: itm.name, sku: itm.sku, unit: itm.unit, unit_price: itm.unit_price, quantity: 1, quantity_issued: 0, unit_cost: itm.unit_price || 0, available }])
+    setSelected((s) => [...s, {
+      id: itm.id,
+      name: itm.name,
+      sku: itm.sku,
+      unit: itm.unit,
+      unit_price: itm.unit_price,
+      quantity: 1,
+      quantity_issued: 0,
+      unit_cost: itm.unit_price || 0,
+      available,
+      item_type: itemType,
+      item_id: itemType === 'inventory' ? itm.id : undefined,
+      asset_id: itemType === 'asset' ? itm.id : undefined,
+    }])
     setSearch('')
   }
 
@@ -120,14 +141,19 @@ export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const pr = purchaseRequests.find((p: any) => p.id === Number(id))
     if (pr && pr.items) {
       pr.items.forEach((it: any) => {
-        if (!selected.find((s) => s.id === it.item_id)) {
-          setSelected((s) => [...s, { 
-            id: it.item_id, 
-            name: it.name, 
-            sku: it.sku, 
-            quantity: it.quantity, 
-            quantity_issued: 0, 
-            unit_cost: it.estimated_cost || 0 
+        const resolvedType = it.item_type || 'inventory'
+        const resolvedId = resolvedType === 'asset' ? it.asset_id : it.item_id
+        if (!selected.find((s) => s.id === resolvedId && s.item_type === resolvedType)) {
+          setSelected((s) => [...s, {
+            id: resolvedId,
+            name: it.name,
+            sku: it.sku,
+            quantity: it.quantity,
+            quantity_issued: 0,
+            unit_cost: it.estimated_cost || 0,
+            item_type: resolvedType,
+            item_id: resolvedType === 'inventory' ? resolvedId : undefined,
+            asset_id: resolvedType === 'asset' ? resolvedId : undefined,
           }])
         }
       })
@@ -210,7 +236,9 @@ export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
     }
     setSubmitting(true)
     const payload = selected.map((it) => ({ 
-      item_id: it.id, 
+      item_type: it.item_type,
+      item_id: it.item_type === 'inventory' ? it.item_id ?? it.id : undefined,
+      asset_id: it.item_type === 'asset' ? it.asset_id ?? it.id : undefined,
       quantity: Number(it.quantity), 
       quantity_issued: Number(it.quantity_issued || 0),
       unit_cost: Number(it.unit_cost || it.unit_price || 0),
@@ -267,23 +295,29 @@ export const NewRequisitionModal: React.FC<Props> = ({ isOpen, onClose }) => {
         </div>
 
         <div>
-          <label className="text-sm font-medium">Search items</label>
+          <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+            <label className="text-sm font-medium">Search {itemType === 'asset' ? 'assets' : 'items'}</label>
+            <select value={itemType} onChange={(e) => setItemType(e.target.value as 'inventory' | 'asset')} className="input-field w-full md:w-40">
+              <option value="inventory">Inventory</option>
+              <option value="asset">Asset</option>
+            </select>
+          </div>
           <input
             className="input-field mt-1"
-            placeholder="Search by name or SKU"
+            placeholder={itemType === 'asset' ? 'Search by asset name or code' : 'Search by name or SKU'}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
 
           {search.trim().length > 0 && (
             <div className="mt-2 border rounded max-h-40 overflow-y-auto bg-white">
-              {inventoryQuery.isLoading && <div className="p-2 text-sm text-slate-500">Searching...</div>}
-              {!inventoryQuery.isLoading && suggestions.length === 0 && <div className="p-2 text-sm text-slate-500">No items</div>}
+              {(itemType === 'asset' ? assetQuery.isLoading : inventoryQuery.isLoading) && <div className="p-2 text-sm text-slate-500">Searching...</div>}
+              {!((itemType === 'asset' ? assetQuery.isLoading : inventoryQuery.isLoading)) && suggestions.length === 0 && <div className="p-2 text-sm text-slate-500">No {itemType === 'asset' ? 'assets' : 'items'} found</div>}
               {suggestions.map((it: any) => (
                 <div key={it.id} className="p-2 hover:bg-slate-50 flex justify-between items-center">
                   <div>
                     <div className="font-medium">{it.name}</div>
-                    <div className="text-xs text-slate-500">{it.sku} • {it.unit} • Available: {it.quantity_available ?? it.quantity_on_hand ?? it.quantity ?? 0}</div>
+                    <div className="text-xs text-slate-500">{it.sku || it.asset_code || it.code || it.unit} • {it.unit || '—'} • Available: {it.quantity_available ?? it.quantity_on_hand ?? it.quantity ?? 0}</div>
                   </div>
                   <div>
                     <button className="btn" onClick={() => addItem(it)}>Add</button>

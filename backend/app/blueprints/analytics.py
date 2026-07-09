@@ -1,5 +1,6 @@
 from datetime import datetime
 from flask import Blueprint, jsonify, Response, request, g
+from app import limiter
 from app.auth_utils import (
     jwt_required_with_user,
     get_current_organisation_id,
@@ -14,39 +15,48 @@ from app.tenant_utils import get_user_by_id, is_token_revoked
 
 analytics_bp = Blueprint("analytics", __name__)
 
+from app.cache import cache
+
+CACHE_TTL_SUMMARY = 60   # dashboard summary: 60 s
+CACHE_TTL_MOVEMENTS = 120  # movement trends: 2 min
+
 
 @analytics_bp.route("/dashboard/summary", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def get_summary():
     """Get high-level dashboard KPIs."""
     org_id = get_current_organisation_id()
     warehouse_id = request.args.get('warehouse_id', type=int)
+
+    role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
+    cache_key = f"analytics:summary:{org_id}:{warehouse_id}:{role_name}"
+
+    cached_payload = cache.get(cache_key)
+    if cached_payload is not None:
+        return jsonify(cached_payload), 200
 
     inventory = AnalyticsService.get_inventory_summary(org_id, warehouse_id=warehouse_id)
     valuation = AnalyticsService.get_inventory_valuation(org_id, warehouse_id=warehouse_id)
     assets = AnalyticsService.get_asset_summary(org_id, warehouse_id=warehouse_id)
     geospatial = AnalyticsService.get_geospatial_stats(org_id)
     compliance = AnalyticsService.get_compliance_stats(org_id)
-    recent_activity = AnalyticsService.get_recent_activity(org_id, limit=7)
+    recent_activity = AnalyticsService.get_recent_activity(org_id, limit=7, warehouse_id=warehouse_id)
     movement_stats = AnalyticsService.get_movement_trends(
         org_id, days=7, warehouse_id=warehouse_id
     )
     insights = AnalyticsService.generate_insights(org_id)
 
-    from flask import g
     from app.models.organization import Organization
     org = Organization.query.get(org_id)
     currency = org.preferences.get("currency", "KES") if org and org.preferences else "KES"
 
-    # Robust calculation of total valuation (Inventory + Assets)
     try:
         inv_val = float(valuation or 0)
         asset_val = float(assets.get("total_current_value", 0)) if isinstance(assets, dict) else 0.0
         total_valuation = inv_val + asset_val
     except (TypeError, ValueError):
         total_valuation = 0.0
-
-    from flask import g
 
     payload = {
         "inventory": inventory,
@@ -59,24 +69,50 @@ def get_summary():
         "movement_stats": movement_stats,
         "insights": insights,
     }
-    return jsonify(filter_analytics_payload(g.user.role, payload)), 200
+
+    from flask import g as _g
+    filtered_payload = filter_analytics_payload(_g.user.role, payload)
+
+    cache.set(cache_key, filtered_payload, ttl=CACHE_TTL_SUMMARY)
+    return jsonify(filtered_payload), 200
 
 
 @analytics_bp.route("/dashboard/movements", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("100 per minute")
 def get_movement_trends():
     """Get inventory movement trends for charts."""
     org_id = get_current_organisation_id()
     days = request.args.get("days", 7, type=int)
     warehouse_id = request.args.get("warehouse_id", type=int)
+
+    cache_key = f"analytics:movements:{org_id}:{warehouse_id}:{days}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return jsonify(cached), 200
+
     trends = AnalyticsService.get_movement_trends(
         org_id, days=days, warehouse_id=warehouse_id
     )
+    cache.set(cache_key, trends, ttl=CACHE_TTL_MOVEMENTS)
     return jsonify(trends), 200
+
+
+@analytics_bp.route("/cache/invalidate", methods=["POST"])
+@require_role("admin")
+@limiter.limit("10 per minute")
+def invalidate_analytics_cache():
+    """Force-clear all analytics cache entries for this organisation."""
+    org_id = get_current_organisation_id()
+    cache.delete_pattern(f"analytics:*:{org_id}:*")
+    cache.delete_pattern(f"analytics:summary:{org_id}:*")
+    cache.delete_pattern(f"analytics:movements:{org_id}:*")
+    return jsonify({"message": "Analytics cache cleared"}), 200
 
 
 @analytics_bp.route("/dashboard/warehouses", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def get_warehouses_stats():
     """Get warehouse utilization metrics."""
     org_id = get_current_organisation_id()
@@ -87,6 +123,7 @@ def get_warehouses_stats():
 @analytics_bp.route("/export/movement", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("5 per minute")
 def export_movement():
     """Export movement history as CSV."""
     org_id = get_current_organisation_id()
@@ -106,6 +143,7 @@ def export_movement():
 @analytics_bp.route("/export/valuation", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("5 per minute")
 def export_valuation():
     """Export inventory valuation as CSV."""
     org_id = get_current_organisation_id()
@@ -123,6 +161,7 @@ def export_valuation():
 
 
 @analytics_bp.route("/stream", methods=["GET"])
+@limiter.limit("30 per minute")
 def stream_events():
     """Real-time event stream (SSE).
 

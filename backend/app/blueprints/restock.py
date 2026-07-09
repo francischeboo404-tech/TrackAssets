@@ -1,4 +1,5 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
+from app import db, limiter
 from app.auth_utils import (
     jwt_required_with_user,
     get_current_organisation_id,
@@ -12,6 +13,7 @@ restock_bp = Blueprint("restock", __name__)
 
 @restock_bp.route("/alerts", methods=["GET"])
 @jwt_required_with_user
+@limiter.limit("60 per minute")
 def get_alerts():
     """Get active restocking alerts for the organization."""
     org_id = get_current_organisation_id()
@@ -48,6 +50,7 @@ def get_alerts():
 @restock_bp.route("/recommendations/<int:item_id>", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("30 per minute")
 def get_recommendation(item_id):
     """Get AI-assisted replenishment recommendations for an item."""
     org_id = get_current_organisation_id()
@@ -86,6 +89,7 @@ def get_recommendation(item_id):
 @restock_bp.route("/thresholds", methods=["PUT"])
 @jwt_required_with_user
 @require_role("admin", "store_manager")
+@limiter.limit("20 per minute")
 def update_thresholds():
     """Update stock thresholds per item/warehouse from frontend."""
     data = request.get_json()

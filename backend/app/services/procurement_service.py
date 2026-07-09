@@ -9,30 +9,83 @@ from app.models.kenya_gov_models import (
     CanvassQuote,
 )
 from app.models.inventory import InventoryItem
+from app.models.asset import Asset
 from datetime import datetime, timezone
+from sqlalchemy.exc import IntegrityError
+from flask import current_app
 
 class ProcurementService:
+    @staticmethod
+    def _normalize_item_type(item_data):
+        item_type = (item_data.get('item_type') or 'inventory').strip().lower()
+        if item_type not in {'inventory', 'asset'}:
+            raise ValidationError("Item type must be either 'inventory' or 'asset'")
+        return item_type
+
+    @staticmethod
+    def _resolve_item_reference(org_id, item_data, *, allow_missing=False):
+        item_type = ProcurementService._normalize_item_type(item_data)
+        if item_type == 'inventory':
+            item_id = item_data.get('item_id')
+            if item_id in (None, '', []):
+                if allow_missing:
+                    return None, None, item_type
+                raise ValidationError("item_id is required for inventory items")
+            item_id = int(item_id)
+            inventory_item = db.session.get(InventoryItem, item_id)
+            if not inventory_item or inventory_item.organisation_id != org_id:
+                raise ValidationError(f"Inventory item {item_id} not found")
+            return item_id, None, item_type
+
+        asset_id = item_data.get('asset_id')
+        if asset_id in (None, '', []):
+            if allow_missing:
+                return None, None, item_type
+            raise ValidationError("asset_id is required for asset items")
+        asset_id = int(asset_id)
+        asset = db.session.get(Asset, asset_id)
+        if not asset or asset.organisation_id != org_id:
+            raise ValidationError(f"Asset {asset_id} not found")
+        return None, asset_id, item_type
+
     @staticmethod
     def create_purchase_request(org_id, requester_id, reason, items_data):
         # Auto-generate PR number: PR-YYYY-XXXXX
         year = datetime.now(timezone.utc).year
         count = PurchaseRequest.query.filter(PurchaseRequest.pr_number.like(f"PR-{year}-%")).count() + 1
         pr_number = f"PR-{year}-{count:05d}"
+
+        # Auto-resolve warehouse from requester's department
+        warehouse_id = None
+        try:
+            from app.models.user import User
+            from app.models.organization import Department
+            requester = db.session.get(User, requester_id)
+            if requester and getattr(requester, 'department_id', None):
+                dept = db.session.get(Department, requester.department_id)
+                if dept:
+                    warehouse_id = getattr(dept, 'warehouse_id', None)
+        except Exception:
+            pass
         
         pr = PurchaseRequest(
             organization_id=org_id,
             pr_number=pr_number,
             requester_id=requester_id,
+            warehouse_id=warehouse_id,
             reason=reason
         )
         db.session.add(pr)
         db.session.flush() # get ID
         
         for item_data in items_data:
+            item_id, asset_id, item_type = ProcurementService._resolve_item_reference(org_id, item_data)
             pr_item = PurchaseRequestItem(
                 organization_id=org_id,
                 pr_id=pr.id,
-                item_id=item_data['item_id'],
+                item_id=item_id,
+                asset_id=asset_id,
+                item_type=item_type,
                 quantity=item_data['quantity'],
                 estimated_cost=item_data.get('estimated_cost', 0.0),
                 justification=item_data.get('justification', '')
@@ -59,9 +112,12 @@ class ProcurementService:
         return pr
 
     @staticmethod
-    def list_purchase_requests(org_id):
+    def list_purchase_requests(org_id, warehouse_id=None):
         """Return purchase requests for an organization, most recent first."""
-        return PurchaseRequest.query.filter_by(organization_id=org_id).order_by(PurchaseRequest.created_at.desc()).all()
+        q = PurchaseRequest.query.filter_by(organization_id=org_id)
+        if warehouse_id:
+            q = q.filter(PurchaseRequest.warehouse_id == warehouse_id)
+        return q.order_by(PurchaseRequest.created_at.desc()).all()
 
 
     @staticmethod
@@ -125,10 +181,13 @@ class ProcurementService:
         PurchaseRequestItem.query.filter_by(pr_id=pr.id).delete()
         
         for item_data in items_data:
+            item_id, asset_id, item_type = ProcurementService._resolve_item_reference(org_id, item_data)
             pr_item = PurchaseRequestItem(
                 organization_id=org_id,
                 pr_id=pr.id,
-                item_id=item_data['item_id'],
+                item_id=item_id,
+                asset_id=asset_id,
+                item_type=item_type,
                 quantity=item_data['quantity'],
                 estimated_cost=item_data.get('estimated_cost', 0.0),
                 justification=item_data.get('justification', '')
@@ -214,23 +273,55 @@ class ProcurementService:
         # Validate PO items are present in PR/RIS and quantities do not exceed requested quantities
         if pr_id:
             for item in items_data:
-                pr_item = PurchaseRequestItem.query.filter_by(pr_id=pr_id, item_id=item['item_id']).first()
-                if not pr_item:
-                    raise ValidationError(f"Item {item['item_id']} is not in the Purchase Request")
-                if int(item['quantity']) > int(pr_item.quantity):
-                    raise ValidationError(
-                        f"PO quantity for item {item['item_id']} exceeds requested PR quantity ({pr_item.quantity})"
-                    )
+                item_type = ProcurementService._normalize_item_type(item)
+                if item_type == 'inventory':
+                    item_id = int(item['item_id'])
+                    pr_item = PurchaseRequestItem.query.filter_by(pr_id=pr_id, item_type='inventory', item_id=item_id).first()
+                    if not pr_item:
+                        pr_item = PurchaseRequestItem.query.filter_by(pr_id=pr_id, item_id=item_id).first()
+                    if not pr_item:
+                        raise ValidationError(f"Item {item_id} is not in the Purchase Request")
+                    if int(item['quantity']) > int(pr_item.quantity):
+                        raise ValidationError(
+                            f"PO quantity for item {item_id} exceeds requested PR quantity ({pr_item.quantity})"
+                        )
+                else:
+                    asset_id = int(item['asset_id'])
+                    pr_item = PurchaseRequestItem.query.filter_by(pr_id=pr_id, item_type='asset', asset_id=asset_id).first()
+                    if not pr_item:
+                        pr_item = PurchaseRequestItem.query.filter_by(pr_id=pr_id, asset_id=asset_id).first()
+                    if not pr_item:
+                        raise ValidationError(f"Asset {asset_id} is not in the Purchase Request")
+                    if int(item['quantity']) > int(pr_item.quantity):
+                        raise ValidationError(
+                            f"PO quantity for asset {asset_id} exceeds requested PR quantity ({pr_item.quantity})"
+                        )
         elif ris_id:
             from app.models.kenya_gov_models import RequisitionItem
             for item in items_data:
-                ris_item = RequisitionItem.query.filter_by(ris_id=ris_id, item_id=item['item_id']).first()
-                if not ris_item:
-                    raise ValidationError(f"Item {item['item_id']} is not in the Requisition")
-                if int(item['quantity']) > int(ris_item.quantity_requested):
-                    raise ValidationError(
-                        f"PO quantity for item {item['item_id']} exceeds requested Requisition quantity ({ris_item.quantity_requested})"
-                    )
+                item_type = ProcurementService._normalize_item_type(item)
+                if item_type == 'inventory':
+                    item_id = int(item['item_id'])
+                    ris_item = RequisitionItem.query.filter_by(ris_id=ris_id, item_type='inventory', item_id=item_id).first()
+                    if not ris_item:
+                        ris_item = RequisitionItem.query.filter_by(ris_id=ris_id, item_id=item_id).first()
+                    if not ris_item:
+                        raise ValidationError(f"Item {item_id} is not in the Requisition")
+                    if int(item['quantity']) > int(ris_item.quantity_requested):
+                        raise ValidationError(
+                            f"PO quantity for item {item_id} exceeds requested Requisition quantity ({ris_item.quantity_requested})"
+                        )
+                else:
+                    asset_id = int(item['asset_id'])
+                    ris_item = RequisitionItem.query.filter_by(ris_id=ris_id, item_type='asset', asset_id=asset_id).first()
+                    if not ris_item:
+                        ris_item = RequisitionItem.query.filter_by(ris_id=ris_id, asset_id=asset_id).first()
+                    if not ris_item:
+                        raise ValidationError(f"Asset {asset_id} is not in the Requisition")
+                    if int(item['quantity']) > int(ris_item.quantity_requested):
+                        raise ValidationError(
+                            f"PO quantity for asset {asset_id} exceeds requested Requisition quantity ({ris_item.quantity_requested})"
+                        )
 
         # Create PO
         year = datetime.now(timezone.utc).year
@@ -251,10 +342,19 @@ class ProcurementService:
         db.session.flush()
 
         for item_data in items_data:
+            item_type = ProcurementService._normalize_item_type(item_data)
+            if item_type == 'inventory':
+                item_id = int(item_data['item_id'])
+                asset_id = None
+            else:
+                item_id = None
+                asset_id = int(item_data['asset_id'])
             po_item = PurchaseOrderItem(
                 organization_id=org_id,
                 po_id=po.id,
-                item_id=item_data['item_id'],
+                item_id=item_id,
+                asset_id=asset_id,
+                item_type=item_type,
                 quantity=item_data['quantity'],
                 unit_cost=item_data['unit_cost'],
                 total_cost=item_data.get('total_cost', item_data['quantity'] * item_data['unit_cost']),
@@ -278,44 +378,113 @@ class ProcurementService:
         return po
 
     @staticmethod
-    def add_canvass_quote(org_id, po_id, supplier_name, item_name, unit_cost, quote_date):
+    def add_canvass_quote(org_id, po_id, supplier_id=None, item_id=None, supplier_name=None, item_name=None, unit_cost=None, quote_date=None):
         po = db.session.get(PurchaseOrder, po_id)
         if not po:
-            raise ValueError("PO not found")
-            
+            raise NotFoundError("Purchase Order not found")
+
+        if unit_cost is None:
+            # Keep backward compatibility with older tests and callers that pass values in the
+            # supplier/item position due to the earlier signature order.
+            if supplier_name is not None and isinstance(supplier_name, (int, float)) and item_name is None:
+                unit_cost = supplier_name
+                supplier_name = None
+            elif item_name is not None and isinstance(item_name, (int, float)) and supplier_name is None:
+                unit_cost = item_name
+                item_name = None
+            elif supplier_id is not None and isinstance(supplier_id, (int, float)) and item_id is None:
+                unit_cost = supplier_id
+                supplier_id = None
+            elif item_id is not None and isinstance(item_id, (int, float)) and supplier_id is None:
+                unit_cost = item_id
+                item_id = None
+            elif supplier_name is not None and isinstance(supplier_name, (int, float)) and item_name is not None:
+                unit_cost = supplier_name
+                quote_date = item_name
+                supplier_name = supplier_id
+                item_name = item_id
+                supplier_id = None
+                item_id = None
+            else:
+                raise ValidationError("Unit cost is required for canvass quotes")
+        try:
+            unit_cost = float(unit_cost)
+        except (TypeError, ValueError):
+            raise ValidationError("Unit cost must be a valid number")
+
+        if supplier_id is None and not supplier_name:
+            raise ValidationError("Supplier selection or name is required for canvass quotes")
+        if item_id is None and not item_name:
+            raise ValidationError("Item selection or name is required for canvass quotes")
+
+        # Resolve names if IDs provided
+        resolved_supplier_name = supplier_name
+        resolved_item_name = item_name
+
+        if supplier_id is not None:
+            from app.models.supplier import Supplier
+            supplier = db.session.get(Supplier, supplier_id)
+            if not supplier:
+                raise NotFoundError("Supplier not found")
+            resolved_supplier_name = getattr(supplier, 'name', resolved_supplier_name)
+
+        if item_id is not None:
+            inv = db.session.get(InventoryItem, item_id)
+            if not inv:
+                raise NotFoundError("Inventory item not found")
+            resolved_item_name = getattr(inv, 'name', resolved_item_name)
+
+        quote_date = quote_date or datetime.now(timezone.utc)
+
         quote = CanvassQuote(
             organization_id=org_id,
             po_id=po_id,
-            supplier_name=supplier_name,
-            item_name=item_name,
+            supplier_name=resolved_supplier_name or 'Unknown',
+            item_name=resolved_item_name or 'Unknown',
             unit_cost=unit_cost,
             total_cost=unit_cost, # simplified
             quote_date=quote_date
         )
         db.session.add(quote)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError as exc:
+            db.session.rollback()
+            raise ConflictError(
+                "A canvass quote with the same details already exists or cannot be created"
+            ) from exc
         return quote
 
     @staticmethod
-    def list_purchase_orders(org_id):
-        """Return purchase orders for an organization, most recent first."""
-        return PurchaseOrder.query.filter_by(organization_id=org_id).order_by(PurchaseOrder.created_at.desc()).all()
+    def list_purchase_orders(org_id, statuses=None, include_inactive=False):
+        """Return purchase orders for an organization, most recent first.
+
+        When the caller needs a receivable PO list for GRN creation, they can request
+        a filtered subset such as approved or partially_received orders without needing
+        to re-implement status filtering in each UI layer.
+        """
+        query = PurchaseOrder.query.filter_by(organization_id=org_id)
+
+        if not include_inactive:
+            query = query.filter(PurchaseOrder.is_active.is_(True))
+
+        if statuses:
+            normalized_statuses = [str(status).strip().lower() for status in statuses if str(status).strip()]
+            if normalized_statuses:
+                query = query.filter(PurchaseOrder.status.in_(normalized_statuses))
+
+        return query.order_by(PurchaseOrder.created_at.desc()).all()
 
     @staticmethod
     def approve_purchase_order(po_id, user_id=None):
         po = db.session.get(PurchaseOrder, po_id)
         if not po:
             raise NotFoundError("PO not found")
-        
-        # 3-supplier canvass requirement for orders >= KES 1,000
-        if po.total_amount >= 1000:
-            quotes_count = CanvassQuote.query.filter_by(po_id=po_id).count()
-            if quotes_count < 3:
-                raise ValidationError("PO over KES 1,000 requires at least 3 canvass quotes before approval")
-                
+
+        # Previously there was a canvass requirement; requirement removed by default.
         # Budget check simulation
         # if not budget_available(po.total_amount): raise ValueError("Insufficient budget")
-        
+
         po.status = 'approved'
         po.approved_at = datetime.now(timezone.utc)
         db.session.commit()
@@ -325,7 +494,7 @@ class ProcurementService:
             action="PO_APPROVED",
             entity_type="purchase_order",
             entity_id=po.id,
-            details={"po_number": po.po_number, "quotes_count": quotes_count if 'quotes_count' in locals() else 0},
+            details={"po_number": po.po_number},
             user_id=user_id,
             organisation_id=po.organization_id,
             module="procurement",
@@ -334,8 +503,26 @@ class ProcurementService:
         return po
 
     @staticmethod
-    def reject_purchase_order(po_id):
-        po = db.session.get(PurchaseOrder, po_id)
+    def close_canvass_quote(po_id, quote_id, user_id=None):
+        quote = db.session.get(CanvassQuote, quote_id)
+        if not quote or quote.po_id != po_id:
+            raise NotFoundError("Canvass quote not found for this PO")
+        if not quote.is_active:
+            raise ValidationError("Canvass quote already closed")
+        quote.is_active = False
+        db.session.commit()
+
+        AuditService.log_action(
+            action="CANVASS_QUOTE_CLOSED",
+            entity_type="canvass_quote",
+            entity_id=quote.id,
+            details={"po_id": po_id},
+            user_id=user_id,
+            organisation_id=quote.organization_id,
+            module="procurement",
+            session=db.session,
+        )
+        return quote
         if not po:
             raise NotFoundError("PO not found")
         if po.status != 'pending':

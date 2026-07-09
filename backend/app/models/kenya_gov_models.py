@@ -56,6 +56,8 @@ class PurchaseRequest(db.Model):
     pr_number = db.Column(db.String(100), nullable=False, unique=True)
     requester_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     department_head_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # warehouse_id: auto-resolved from requester's department on creation
+    warehouse_id = db.Column(db.Integer, db.ForeignKey('warehouses.id'), nullable=True)
     status = db.Column(db.String(50), default='pending')
     reason = db.Column(db.Text)
     approved_at = db.Column(db.DateTime, nullable=True)
@@ -72,7 +74,9 @@ class PurchaseRequestItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
     pr_id = db.Column(db.Integer, db.ForeignKey('purchase_requests.id'), nullable=False)
-    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True)
+    item_type = db.Column(db.String(50), nullable=False, default='inventory')
     quantity = db.Column(db.Integer, nullable=False)
     estimated_cost = db.Column(SafeNumeric(12, 2), nullable=False) # Currency is KES
     justification = db.Column(db.Text)
@@ -108,7 +112,9 @@ class PurchaseOrderItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
     po_id = db.Column(db.Integer, db.ForeignKey('purchase_orders.id'), nullable=False)
-    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True)
+    item_type = db.Column(db.String(50), nullable=False, default='inventory')
     quantity = db.Column(db.Integer, nullable=False)
     unit_cost = db.Column(SafeNumeric(12, 2), nullable=False) # Currency is KES
     total_cost = db.Column(SafeNumeric(12, 2), nullable=False) # Currency is KES
@@ -150,6 +156,8 @@ class GoodsReceiptNote(db.Model):
     received_date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     status = db.Column(db.String(50), default='quarantine')
     total_quantity = db.Column(db.Integer, default=0)
+    # warehouse_id: the warehouse where goods are being received into
+    warehouse_id = db.Column(db.Integer, db.ForeignKey('warehouses.id'), nullable=True)
     
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -163,10 +171,13 @@ class GoodsReceiptItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
     grn_id = db.Column(db.Integer, db.ForeignKey('goods_receipt_notes.id'), nullable=False)
-    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True)
+    item_type = db.Column(db.String(50), nullable=False, default='inventory')
     quantity_received = db.Column(db.Integer, nullable=False)
     quantity_accepted = db.Column(db.Integer, default=0)
     quantity_rejected = db.Column(db.Integer, default=0)
+    warehouse_id = db.Column(db.Integer, db.ForeignKey('warehouses.id'), nullable=True)
     bin_location_id = db.Column(db.Integer, db.ForeignKey('warehouse_bins.id'), nullable=True)
     unit_cost = db.Column(SafeNumeric(12, 2), nullable=False) # Currency is KES
     expiry_date = db.Column(db.DateTime, nullable=True)
@@ -176,6 +187,13 @@ class GoodsReceiptItem(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
+    
+    # Relationships
+    warehouse = db.relationship(
+        'Warehouse',
+        backref='grn_items',
+        foreign_keys=[warehouse_id]
+    )
 
 class InspectionReport(db.Model):
     __tablename__ = 'inspection_reports'
@@ -257,7 +275,9 @@ class RequisitionItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
     ris_id = db.Column(db.Integer, db.ForeignKey('requisition_slips.id'), nullable=False)
-    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=False)
+    item_id = db.Column(db.Integer, db.ForeignKey('inventory_items.id'), nullable=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey('assets.id'), nullable=True)
+    item_type = db.Column(db.String(50), nullable=False, default='inventory')
     quantity_requested = db.Column(db.Integer, nullable=False)
     quantity_issued = db.Column(db.Integer, default=0)
     unit_cost = db.Column(SafeNumeric(12, 2), nullable=False) # KES

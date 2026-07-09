@@ -1,11 +1,14 @@
 from flask import Blueprint, request, jsonify
+from app import limiter
 from app.auth_utils import jwt_required_with_user, get_current_organisation_id, get_current_user_id, require_permission
 from app.services.ledger_service import LedgerService
 
 ledger_bp = Blueprint('ledger_bp', __name__)
 
+
 @ledger_bp.route('/variance-reports', methods=['POST'])
 @require_permission('variance:create')
+@limiter.limit("20 per minute")
 def create_variance_report():
     data = request.json
     org_id = get_current_organisation_id()
@@ -24,6 +27,7 @@ def create_variance_report():
 
 @ledger_bp.route('/variance-reports/<int:id>/resolve', methods=['PUT'])
 @require_permission('variance:resolve')
+@limiter.limit("10 per minute")
 def resolve_variance(id):
     user_id = get_current_user_id()
     try:

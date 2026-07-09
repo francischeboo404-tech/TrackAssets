@@ -43,6 +43,10 @@ def get_warehouses():
                 "warehouse_code": warehouse.code,
                 "address": warehouse.address,
                 "is_active": warehouse.is_active,
+                "is_main_warehouse": getattr(warehouse, 'is_main_warehouse', False),
+                "warehouse_type": getattr(warehouse, 'warehouse_type', 'branch'),
+                "hierarchy_level": getattr(warehouse, 'hierarchy_level', 1),
+                "parent_warehouse_id": getattr(warehouse, 'parent_warehouse_id', None),
                 "total_bins": metrics.get("total_bins", 0),
                 "occupied_bins": metrics.get("occupied_bins", 0),
                 "empty_bins": metrics.get("empty_bins", 0),
@@ -71,11 +75,35 @@ def create_warehouse():
     if duplicate:
         raise ValidationError("Warehouse code already exists")
 
+    # Smart hierarchy assignment:
+    # If no main warehouse exists for this org, the first new one becomes main.
+    # Otherwise, new warehouses are auto-assigned as branches under main.
+    existing_main = Warehouse.query.filter_by(
+        organisation_id=org_id, is_main_warehouse=True
+    ).first()
+
+    if existing_main is None:
+        # First warehouse — set as main
+        is_main = True
+        warehouse_type = 'main'
+        hierarchy_level = 0
+        parent_warehouse_id = None
+    else:
+        # Subsequent warehouses — set as branch under main
+        is_main = False
+        warehouse_type = 'branch'
+        hierarchy_level = 1
+        parent_warehouse_id = existing_main.id
+
     new_warehouse = Warehouse(
         organisation_id=org_id,
         name=name,
         code=code,
         address=(data.get("address") or "").strip() or None,
+        is_main_warehouse=is_main,
+        warehouse_type=warehouse_type,
+        hierarchy_level=hierarchy_level,
+        parent_warehouse_id=parent_warehouse_id,
     )
     db.session.add(new_warehouse)
     db.session.commit()
@@ -86,7 +114,98 @@ def create_warehouse():
         organisation_id=org_id,
     )
 
-    return jsonify({"message": "Warehouse created", "id": new_warehouse.id}), 201
+    return jsonify({
+        "message": "Warehouse created",
+        "id": new_warehouse.id,
+        "is_main_warehouse": is_main,
+        "warehouse_type": warehouse_type,
+    }), 201
+
+
+@warehouses_bp.route("/org-summary", methods=["GET"])
+@jwt_required_with_user
+def get_org_warehouse_summary():
+    """Org-wide multi-warehouse KPI summary for the All Warehouses hub."""
+    org_id = get_current_organisation_id()
+    from app.models.stock_levels import WarehouseStock
+    from app.models.asset import Asset
+    from app.models.organization import Department, Employee
+    from app.models.kenya_gov_models import PurchaseRequest
+    from sqlalchemy import func
+
+    warehouses = Warehouse.query.filter_by(organisation_id=org_id, is_active=True).all()
+    utilization_map = {
+        item["warehouse_id"]: item
+        for item in AnalyticsService.get_warehouse_utilization(org_id)
+    }
+
+    # Org-wide aggregates
+    total_inventory_value = db.session.query(
+        func.coalesce(func.sum(
+            WarehouseStock.quantity_on_hand *
+            db.cast(db.session.query(db.func.coalesce(
+                db.literal_column('unit_price'), 0
+            )), db.Float)
+        ), 0)
+    ).scalar() or 0
+
+    # Simpler approach for inventory value
+    from app.models.inventory import InventoryItem
+    inv_items = InventoryItem.query.filter_by(organisation_id=org_id, is_active=True).all()
+    total_inventory_value = sum(
+        float(i.unit_price or 0) * int(i.quantity or 0) for i in inv_items
+    )
+
+    total_assets = Asset.query.filter_by(organisation_id=org_id).count()
+    total_asset_value = db.session.query(
+        func.coalesce(func.sum(Asset.current_value), 0)
+    ).filter_by(organisation_id=org_id).scalar() or 0
+
+    total_departments = Department.query.filter_by(organisation_id=org_id, is_active=True).count()
+    total_employees = Employee.query.filter_by(organisation_id=org_id, is_active=True).count()
+    pending_prs = PurchaseRequest.query.filter_by(organization_id=org_id, status='pending', is_active=True).count()
+
+    warehouse_details = []
+    for wh in warehouses:
+        metrics = utilization_map.get(wh.id, {})
+        wh_inv_value = db.session.query(
+            func.coalesce(func.sum(WarehouseStock.quantity_on_hand), 0)
+        ).filter_by(warehouse_id=wh.id).scalar() or 0
+        wh_assets = Asset.query.filter_by(organisation_id=org_id, warehouse_id=wh.id).count()
+        wh_asset_val = db.session.query(
+            func.coalesce(func.sum(Asset.current_value), 0)
+        ).filter_by(organisation_id=org_id, warehouse_id=wh.id).scalar() or 0
+        wh_depts = Department.query.filter_by(organisation_id=org_id, warehouse_id=wh.id, is_active=True).count()
+
+        warehouse_details.append({
+            "id": wh.id,
+            "name": wh.name,
+            "code": wh.code,
+            "address": wh.address,
+            "is_main_warehouse": getattr(wh, 'is_main_warehouse', False),
+            "warehouse_type": getattr(wh, 'warehouse_type', 'branch'),
+            "hierarchy_level": getattr(wh, 'hierarchy_level', 1),
+            "stock_units": int(wh_inv_value),
+            "asset_count": wh_assets,
+            "asset_value": float(wh_asset_val),
+            "department_count": wh_depts,
+            "utilization_percentage": metrics.get("utilization_percentage", 0),
+            "total_bins": metrics.get("total_bins", 0),
+            "occupied_bins": metrics.get("occupied_bins", 0),
+        })
+
+    return jsonify({
+        "total_warehouses": len(warehouses),
+        "total_inventory_value": round(total_inventory_value, 2),
+        "total_assets": total_assets,
+        "total_asset_value": float(total_asset_value),
+        "total_departments": total_departments,
+        "total_employees": total_employees,
+        "pending_purchase_requests": pending_prs,
+        "warehouses": warehouse_details,
+    }), 200
+
+
 
 
 @warehouses_bp.route("/<int:warehouse_id>", methods=["PUT"])

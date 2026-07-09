@@ -1,11 +1,14 @@
 from flask import Blueprint, request, jsonify
+from app import limiter
 from app.auth_utils import jwt_required_with_user, get_current_organisation_id, get_current_user_id, require_role, require_permission
 from app.services.disposal_service import DisposalService
 
 disposal_bp = Blueprint('disposal_bp', __name__)
 
+
 @disposal_bp.route('/disposal-requests', methods=['POST'])
 @require_permission('disposal:create')
+@limiter.limit("20 per minute")
 def create_disposal():
     data = request.json
     org_id = get_current_organisation_id()
@@ -23,6 +26,7 @@ def create_disposal():
 
 @disposal_bp.route('/disposal-requests/<int:id>/approve', methods=['PUT'])
 @require_role('admin', 'superadmin')
+@limiter.limit("10 per minute")
 def approve_disposal(id):
     data = request.json or {}
     user_id = get_current_user_id()
@@ -40,6 +44,7 @@ def approve_disposal(id):
 
 @disposal_bp.route('/disposal-requests/<int:id>/execute', methods=['PUT'])
 @require_role('admin', 'superadmin')
+@limiter.limit("10 per minute")
 def execute_disposal(id):
     try:
         user_id = get_current_user_id()

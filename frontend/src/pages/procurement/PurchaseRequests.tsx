@@ -5,7 +5,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { usePurchaseRequests, useCreatePurchaseRequest, useApprovePurchaseRequest, useRejectPurchaseRequest } from '../../hooks/useProcurement';
 import ViewPRModal from '../../components/ui/ViewPRModal';
 import { useInventory } from '../../hooks/useInventory';
+import { useAssets } from '../../hooks/useAssets';
 import { useToast } from "../../context/ToastContext";
+import { useWarehouse } from '../../context/WarehouseContext';
 
 export default function PurchaseRequests() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -20,9 +22,11 @@ export default function PurchaseRequests() {
 
   const { addToast } = useToast();
   const queryClient = useQueryClient();
+  const { activeWarehouseId } = useWarehouse();
 
-  const { data: requestsData, isLoading } = usePurchaseRequests() as any;
-  const { data: inventoryData } = useInventory();
+  const { data: requestsData, isLoading } = usePurchaseRequests(activeWarehouseId) as any;
+  const { data: inventoryData } = useInventory(activeWarehouseId ? { warehouse_id: activeWarehouseId } : {});
+  const { data: assetsData } = useAssets(activeWarehouseId ? { per_page: 100, warehouse_id: activeWarehouseId } : { per_page: 100 });
   
   const createPR = useCreatePurchaseRequest();
   const approvePR = useApprovePurchaseRequest();
@@ -30,9 +34,10 @@ export default function PurchaseRequests() {
 
   const requests = requestsData?.purchase_requests || requestsData || [];
   const inventory = inventoryData?.inventory || [];
+  const assets = assetsData?.assets || [];
 
   const handleAddItem = () => {
-    setItems([...items, { item_id: "", quantity: 1, estimated_cost: 0, justification: "" }]);
+    setItems([...items, { item_type: "inventory", item_id: "", asset_id: "", quantity: 1, estimated_cost: 0, justification: "" }]);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -41,7 +46,13 @@ export default function PurchaseRequests() {
 
   const handleItemChange = (index: number, field: string, value: any) => {
     const newItems = [...items];
-    newItems[index][field] = value;
+    if (field === "item_type") {
+      newItems[index].item_type = value;
+      newItems[index].item_id = "";
+      newItems[index].asset_id = "";
+    } else {
+      newItems[index][field] = value;
+    }
     setItems(newItems);
   };
 
@@ -52,13 +63,18 @@ export default function PurchaseRequests() {
       return;
     }
     
-    // Convert IDs to numbers
-    const formattedItems = items.map(item => ({
-      ...item,
-      item_id: Number(item.item_id),
-      quantity: Number(item.quantity),
-      estimated_cost: Number(item.estimated_cost),
-    }));
+    const formattedItems = items.map(item => {
+      const baseItem = {
+        item_type: item.item_type || "inventory",
+        quantity: Number(item.quantity),
+        estimated_cost: Number(item.estimated_cost || 0),
+        justification: item.justification || "",
+      };
+      if (item.item_type === "asset") {
+        return { ...baseItem, asset_id: Number(item.asset_id), item_id: undefined };
+      }
+      return { ...baseItem, item_id: Number(item.item_id), asset_id: undefined };
+    });
 
     try {
       await createPR.mutateAsync({ reason, items: formattedItems });
@@ -153,13 +169,24 @@ export default function PurchaseRequests() {
                   <div className="space-y-3">
                     {items.map((item, idx) => (
                       <div key={idx} className="flex flex-wrap md:flex-nowrap items-end gap-3 p-4 bg-slate-50 border border-slate-100 rounded-xl">
+                        <div className="w-full md:w-40">
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">Type</label>
+                          <select value={item.item_type || "inventory"} onChange={(e) => handleItemChange(idx, "item_type", e.target.value)} className="input-field w-full py-2">
+                            <option value="inventory">Inventory</option>
+                            <option value="asset">Asset</option>
+                          </select>
+                        </div>
                         <div className="flex-1 min-w-[200px]">
-                          <label className="block text-xs font-semibold text-slate-500 mb-1">Item</label>
-                          <select required value={item.item_id} onChange={(e) => handleItemChange(idx, "item_id", e.target.value)} className="input-field w-full py-2">
-                            <option value="">Select Item</option>
-                            {inventory.map((inv: any) => (
-                              <option key={inv.id} value={inv.id}>{inv.name} ({inv.sku})</option>
-                            ))}
+                          <label className="block text-xs font-semibold text-slate-500 mb-1">{item.item_type === "asset" ? "Asset" : "Item"}</label>
+                          <select required value={item.item_type === "asset" ? item.asset_id : item.item_id} onChange={(e) => handleItemChange(idx, item.item_type === "asset" ? "asset_id" : "item_id", e.target.value)} className="input-field w-full py-2">
+                            <option value="">Select {item.item_type === "asset" ? "Asset" : "Item"}</option>
+                            {item.item_type === "asset"
+                              ? assets.map((asset: any) => (
+                                  <option key={asset.id} value={asset.id}>{asset.name} ({asset.asset_code || asset.code})</option>
+                                ))
+                              : inventory.map((inv: any) => (
+                                  <option key={inv.id} value={inv.id}>{inv.name} ({inv.sku})</option>
+                                ))}
                           </select>
                         </div>
                         <div className="w-full md:w-32">

@@ -225,7 +225,7 @@ const Reports = () => {
            </h3>
            <div className="h-64 min-h-[180px] min-w-0" style={{ minWidth: 0 }}>
              {!isLoading && summary ? (
-               <ResponsiveContainer width="100%" height="100%">
+               <ResponsiveContainer width="99%" height={250}>
                  <PieChart>
                    <Pie
                      data={[

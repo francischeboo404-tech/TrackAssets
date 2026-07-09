@@ -18,7 +18,6 @@ from flask_jwt_extended import (
 
 from flask_limiter.util import get_remote_address
 from app import limiter
-from flask_limiter.util import get_remote_address
 
 from app import db
 from app.audit_service import AuditService
@@ -353,3 +352,189 @@ def get_current_user():
         ),
         200,
     )
+
+
+# ---------------------------------------------------------------------------
+# Password Reset (1-minute expiry)
+# ---------------------------------------------------------------------------
+
+@auth_bp.route("/forgot-password", methods=["OPTIONS"])
+def forgot_password_options():
+    return preflight_response(["POST", "OPTIONS"])
+
+
+@auth_bp.route("/forgot-password", methods=["POST"])
+@limiter.limit("3 per hour", methods=["POST"])
+def forgot_password():
+    """
+    Request a password-reset link.
+
+    Body: { "email": "user@example.com" }
+
+    A time-limited token (TTL = PASSWORD_RESET_TOKEN_TTL_SECONDS, default 60 s)
+    is generated, its SHA-256 hash stored, and a reset link emailed to the user.
+    The response is always 200 to avoid email enumeration.
+    """
+    import hashlib
+    import secrets
+    from app.logging_utils import log_security_event
+    from app.models.token import PasswordResetToken
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+
+    if not email:
+        # Always 200 — do not reveal whether email exists
+        return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
+
+    ttl_seconds = current_app.config.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", 60)
+    expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
+
+    with public_schema():
+        user_obj = user.User.query.filter_by(email=email, is_active=True).first()
+
+    if not user_obj:
+        # Constant-time response — do not reveal whether user exists
+        log_security_event("FORGOT_PASSWORD_UNKNOWN_EMAIL", email=email)
+        return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
+
+    # Invalidate any existing unused tokens for this user
+    PasswordResetToken.query.filter_by(user_id=user_obj.id, used_at=None).delete()
+
+    # Generate a secure random token and store its SHA-256 hash
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    reset_token = PasswordResetToken(
+        user_id=user_obj.id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.session.add(reset_token)
+    db.session.commit()
+
+    # Build the reset link pointing at the frontend
+    frontend_url = current_app.config.get("FRONTEND_BASE_URL", "http://localhost:5173")
+    reset_link = f"{frontend_url}/reset-password?token={raw_token}"
+
+    # Send email (best-effort — failure does not abort the request)
+    try:
+        from flask_mail import Message
+        from app import mail
+
+        msg = Message(
+            subject="TrackIT — Password Reset (expires in 1 minute)",
+            recipients=[user_obj.email],
+            body=(
+                f"Hello {user_obj.first_name or user_obj.username},\n\n"
+                f"You requested a password reset for your TrackIT account.\n\n"
+                f"Click the link below to reset your password "
+                f"(valid for {ttl_seconds} seconds only):\n\n"
+                f"{reset_link}\n\n"
+                f"If you did not request this, please ignore this email "
+                f"and contact your administrator immediately.\n\n"
+                f"— TrackIT Security Team"
+            ),
+        )
+        mail.send(msg)
+    except Exception as exc:  # noqa: BLE001
+        current_app.logger.warning("Password-reset email failed: %s", exc)
+
+    log_security_event(
+        "FORGOT_PASSWORD_REQUESTED",
+        user_id=user_obj.id,
+        email=email,
+        expires_at=expires_at.isoformat(),
+        ip=request.remote_addr,
+    )
+    AuditService.log_authentication_event(
+        "PASSWORD_RESET_REQUESTED",
+        user_obj.id,
+        {"email": email, "ip_address": request.remote_addr, "expires_at": expires_at.isoformat()},
+    )
+
+    return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
+
+
+@auth_bp.route("/reset-password", methods=["OPTIONS"])
+def reset_password_options():
+    return preflight_response(["POST", "OPTIONS"])
+
+
+@auth_bp.route("/reset-password", methods=["POST"])
+@limiter.limit("5 per minute", methods=["POST"])
+def reset_password():
+    """
+    Consume a password-reset token and set a new password.
+
+    Body: { "token": "<raw_token>", "new_password": "<new_password>" }
+
+    The token is valid for PASSWORD_RESET_TOKEN_TTL_SECONDS (default 60 s).
+    Once used, the token is marked as consumed and cannot be reused.
+    """
+    import hashlib
+    from app.logging_utils import log_security_event
+    from app.models.token import PasswordResetToken
+
+    data = request.get_json(silent=True) or {}
+    raw_token = (data.get("token") or "").strip()
+    new_password = data.get("new_password", "")
+
+    if not raw_token or not new_password:
+        raise ValidationError("Both 'token' and 'new_password' are required.")
+
+    if len(new_password) < 8:
+        raise ValidationError("Password must be at least 8 characters.")
+
+    # Hash the incoming token to compare against stored hash
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    reset_token = PasswordResetToken.query.filter_by(
+        token_hash=token_hash, used_at=None
+    ).first()
+
+    if not reset_token:
+        log_security_event("RESET_PASSWORD_INVALID_TOKEN", ip=request.remote_addr)
+        raise ValidationError("Invalid or already-used reset token.")
+
+    if not reset_token.is_valid():
+        # Token expired — 1 minute has elapsed
+        log_security_event(
+            "RESET_PASSWORD_EXPIRED_TOKEN",
+            user_id=reset_token.user_id,
+            ip=request.remote_addr,
+        )
+        raise ValidationError(
+            "This password reset link has expired (1-minute limit). "
+            "Please request a new one."
+        )
+
+    user_obj = reset_token.user
+    if not user_obj or not user_obj.is_active:
+        raise ValidationError("User account is not active.")
+
+    # Hash and apply the new password
+    password_bytes = new_password.encode("utf-8")
+    salt = bcrypt.gensalt(rounds=current_app.config["BCRYPT_LOG_ROUNDS"])
+    user_obj.password_hash = bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+
+    # Mark token as used
+    reset_token.used_at = datetime.utcnow()
+
+    # Invalidate all active sessions by clearing locked_until and failed attempts
+    user_obj.failed_login_attempts = 0
+    user_obj.locked_until = None
+
+    db.session.commit()
+
+    log_security_event(
+        "RESET_PASSWORD_SUCCESS",
+        user_id=user_obj.id,
+        ip=request.remote_addr,
+    )
+    AuditService.log_authentication_event(
+        "PASSWORD_RESET_COMPLETED",
+        user_obj.id,
+        {"ip_address": request.remote_addr},
+    )
+
+    return jsonify({"message": "Password reset successfully. You can now log in."}), 200

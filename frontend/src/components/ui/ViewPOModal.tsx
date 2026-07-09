@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import api from '../../services/api';
 import { Modal } from './Modal';
 import { FileText } from 'lucide-react';
+import CloseCanvassButton from './CloseCanvassButton';
 
 interface ViewPOModalProps {
   isOpen: boolean;
@@ -95,6 +96,11 @@ export default function ViewPOModal({ isOpen, onClose, poId }: ViewPOModalProps)
                       <p className="font-bold text-slate-800">{q.supplier_name}</p>
                       <p className="text-sm text-slate-500 mt-1">{q.item_name}</p>
                       <p className="text-emerald-600 font-bold mt-2">KES {q.unit_cost?.toLocaleString()}</p>
+                      {q.is_active !== false && (
+                        <div className="mt-3">
+                          <CloseCanvassButton poId={po.id} quoteId={q.id} />
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

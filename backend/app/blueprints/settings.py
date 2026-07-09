@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import Blueprint, Response, jsonify, request, g
 
+from app import limiter
 from app.auth_utils import (
     get_current_organisation_id,
     jwt_required_with_user,
@@ -17,6 +18,7 @@ settings_bp = Blueprint("settings", __name__)
 @settings_bp.route("/organization", methods=["GET"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("100 per minute")
 def get_organization_settings():
     """Fetch organization configuration (admin only)."""
     org_id = get_current_organisation_id()
@@ -32,6 +34,7 @@ def get_organization_settings():
 @settings_bp.route("/organization", methods=["PUT"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("20 per minute")
 def update_organization_settings():
     """Update organization name and whitelisted preferences."""
     org_id = get_current_organisation_id()
@@ -74,6 +77,7 @@ def organization_options():
 @settings_bp.route("/organization/logo", methods=["POST"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("10 per minute")
 def upload_organization_logo():
     """Upload organization logo (max 2MB)."""
     org_id = get_current_organisation_id()
@@ -112,6 +116,7 @@ def upload_organization_logo_options():
 @settings_bp.route("/organization/export", methods=["POST"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("5 per minute")
 def export_system_data():
     """Export assets and inventory as CSV."""
     org_id = get_current_organisation_id()
@@ -142,6 +147,7 @@ def export_system_data_options():
 @settings_bp.route("/organization/purge", methods=["DELETE"])
 @jwt_required_with_user
 @require_role("admin")
+@limiter.limit("2 per minute")
 def purge_historical_data():
     """Delete stock movement logs older than 3 years."""
     org_id = get_current_organisation_id()

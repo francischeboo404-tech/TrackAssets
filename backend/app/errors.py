@@ -150,6 +150,7 @@ def register_error_handlers(app):
 
     @app.errorhandler(429)
     def handle_rate_limit(error):
+        from app.alert_service import AlertService
         AuditService.log_user_action(
             action="RATE_LIMIT_EXCEEDED",
             details={
@@ -158,7 +159,17 @@ def register_error_handlers(app):
                 "url": request.url,
             },
         )
-        return _error_response("Too many requests", 429, "RateLimitExceeded")
+        AlertService.send_security_alert(
+            "RATE_LIMIT_EXCEEDED",
+            context={
+                "ip": request.remote_addr,
+                "endpoint": request.endpoint,
+                "method": request.method,
+                "url": request.url,
+            },
+            level="WARNING",
+        )
+        return _error_response("Too many requests. Please slow down.", 429, "RateLimitExceeded")
 
     from sqlalchemy.exc import IntegrityError, DataError, OperationalError
 
@@ -220,6 +231,7 @@ def register_error_handlers(app):
 
     @app.errorhandler(Exception)
     def handle_unexpected_error(error):
+        from app.alert_service import AlertService
         current_app.logger.error(f"Unexpected error: {traceback.format_exc()}")
 
         AuditService.log_user_action(
@@ -233,6 +245,9 @@ def register_error_handlers(app):
         )
 
         db.session.rollback()
+
+        # Fire alert for unexpected server errors (non-HTTP exceptions)
+        AlertService.log_critical_error(error, endpoint=request.endpoint)
 
         extra = {"details": str(error)} if current_app.debug else None
         return _error_response(

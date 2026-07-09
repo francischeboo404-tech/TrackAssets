@@ -31,10 +31,14 @@ def get_departments():
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 50, type=int)
     search = request.args.get("search")
+    warehouse_id = request.args.get("warehouse_id", type=int)
 
     query = organization.Department.query.filter_by(
         organisation_id=org_id, is_active=True
     )
+
+    if warehouse_id:
+        query = query.filter(organization.Department.warehouse_id == warehouse_id)
 
     if search:
         query = query.outerjoin(organization.Department.head).filter(
@@ -56,6 +60,7 @@ def get_departments():
             "name": dept.name,
             "code": dept.code,
             "description": dept.description,
+            "warehouse_id": getattr(dept, 'warehouse_id', None),
             "is_active": dept.is_active,
             "created_at": dept.created_at.isoformat(),
             "updated_at": dept.updated_at.isoformat(),

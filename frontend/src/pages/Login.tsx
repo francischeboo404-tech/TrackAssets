@@ -9,6 +9,7 @@ import {
   Activity,
   Eye,
   EyeOff,
+  X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
@@ -21,6 +22,11 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Forgot Password State
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [isForgotSubmitting, setIsForgotSubmitting] = useState(false);
 
   const { login } = useAuth();
   const { addToast } = useToast();
@@ -48,6 +54,24 @@ const LoginPage = () => {
       );
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail) return;
+    
+    setIsForgotSubmitting(true);
+    try {
+      await api.post("/auth/forgot-password", { email: forgotEmail });
+      addToast("success", "If that email is registered, a reset link has been sent.");
+      setShowForgotModal(false);
+      setForgotEmail("");
+    } catch (err: any) {
+      // Endpoint always returns 200 to prevent enumeration, but catch network errors
+      addToast("error", err.response?.data?.message || "Failed to request password reset");
+    } finally {
+      setIsForgotSubmitting(false);
     }
   };
 
@@ -127,12 +151,13 @@ const LoginPage = () => {
                 />
                 <span>Remember me</span>
               </label>
-              <a
-                href="#"
+              <button
+                type="button"
+                onClick={() => setShowForgotModal(true)}
                 className="hover:text-brand-primary transition-colors"
               >
                 Forgot password?
-              </a>
+              </button>
             </div>
 
             <button
@@ -179,6 +204,57 @@ const LoginPage = () => {
           </div>
         </div>
       </motion.div>
+
+      {/* Forgot Password Modal */}
+      {showForgotModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 relative"
+          >
+            <button
+              onClick={() => setShowForgotModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Reset Password</h3>
+            <p className="text-sm text-slate-500 mb-6">
+              Enter your email address and we'll send you a link to reset your password.
+            </p>
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <div>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-brand-primary transition-colors">
+                    <Mail className="w-5 h-5" />
+                  </div>
+                  <input
+                    type="email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    placeholder="name@institution.edu"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary/50 transition-all duration-300"
+                    required
+                  />
+                </div>
+              </div>
+              <button
+                type="submit"
+                disabled={isForgotSubmitting || !forgotEmail}
+                className="w-full bg-brand-primary hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-all duration-300"
+              >
+                {isForgotSubmitting ? (
+                  <Activity className="w-5 h-5 animate-spin" />
+                ) : (
+                  "Send Reset Link"
+                )}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

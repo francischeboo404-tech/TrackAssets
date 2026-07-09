@@ -110,6 +110,57 @@ class StockService:
 
         return item.quantity
 
+    def _upsert_stock_card_and_ledger(self, item, org_id, location_id, qty_on_hand, quantity, is_increase):
+        """Create or update stock card and ledger rows for both aggregate and warehouse-specific views."""
+        now = datetime.now(timezone.utc)
+        locations = [None]
+        if location_id is not None:
+            locations.append(location_id)
+
+        for current_location_id in locations:
+            stock_card = (
+                self.session.query(StockCard).with_for_update()
+                .filter_by(organization_id=org_id, item_id=item.id, location_id=current_location_id)
+                .first()
+            )
+            if not stock_card:
+                stock_card = StockCard(
+                    organization_id=org_id,
+                    item_id=item.id,
+                    location_id=current_location_id,
+                    stock_card_number=f"SC-{org_id}-{item.id}-{current_location_id or 'G'}",
+                    quantity_on_hand=qty_on_hand,
+                    last_received_date=(now if quantity > 0 and is_increase else None),
+                )
+                self.session.add(stock_card)
+            else:
+                stock_card.quantity_on_hand = qty_on_hand
+                if quantity > 0 and is_increase:
+                    stock_card.last_received_date = now
+
+            ledger = (
+                self.session.query(SuppliesLedgerCard).with_for_update()
+                .filter_by(organization_id=org_id, item_id=item.id, location_id=current_location_id)
+                .first()
+            )
+            total_value = (qty_on_hand * (item.unit_price or 0))
+            if not ledger:
+                ledger = SuppliesLedgerCard(
+                    organization_id=org_id,
+                    item_id=item.id,
+                    location_id=current_location_id,
+                    ledger_number=f"SL-{org_id}-{item.id}-{current_location_id or 'G'}",
+                    quantity_on_hand=qty_on_hand,
+                    total_value=total_value,
+                    last_received_date=(now if quantity > 0 and is_increase else None),
+                )
+                self.session.add(ledger)
+            else:
+                ledger.quantity_on_hand = qty_on_hand
+                ledger.total_value = total_value
+                if quantity > 0 and is_increase:
+                    ledger.last_received_date = now
+
     def increase_stock(self, item_id, org_id, quantity, warehouse_id=None, reference=None, notes=None, user_id=None, module=None, commit=True, destination_warehouse_id=None):
         if quantity <= 0:
             raise ValidationError("Quantity must be greater than 0")
@@ -128,11 +179,17 @@ class StockService:
                 .filter_by(item_id=item_id, warehouse_id=warehouse_id)
                 .first()
             )
+            existing_warehouse_rows = (
+                self.session.query(WarehouseStock.id)
+                .filter_by(item_id=item_id)
+                .count()
+            )
             if not wh_stock:
+                initial_quantity = item.quantity if existing_warehouse_rows == 0 else 0
                 wh_stock = WarehouseStock(
                     item_id=item_id,
                     warehouse_id=warehouse_id,
-                    quantity_on_hand=quantity,
+                    quantity_on_hand=initial_quantity + quantity,
                     quantity_reserved=0,
                 )
                 self.session.add(wh_stock)
@@ -209,7 +266,6 @@ class StockService:
 
         # Update StockCard and SuppliesLedgerCard for the affected location
         location_id = warehouse_id
-        # Determine accurate quantity_on_hand (warehouse-level if provided)
         if location_id:
             wh = (
                 self.session.query(WarehouseStock).with_for_update()
@@ -220,47 +276,14 @@ class StockService:
         else:
             qty_on_hand = item.quantity
 
-        stock_card = (
-            self.session.query(StockCard).with_for_update()
-            .filter_by(organization_id=org_id, item_id=item_id, location_id=location_id)
-            .first()
+        self._upsert_stock_card_and_ledger(
+            item=item,
+            org_id=org_id,
+            location_id=location_id,
+            qty_on_hand=qty_on_hand,
+            quantity=quantity,
+            is_increase=True,
         )
-        if not stock_card:
-            stock_card = StockCard(
-                organization_id=org_id,
-                item_id=item_id,
-                location_id=location_id,
-                stock_card_number=f"SC-{org_id}-{item_id}-{location_id or 'G'}",
-                quantity_on_hand=qty_on_hand,
-                last_received_date=(datetime.now(timezone.utc) if quantity > 0 else None),
-            )
-            self.session.add(stock_card)
-        else:
-            stock_card.quantity_on_hand = qty_on_hand
-            if quantity > 0:
-                stock_card.last_received_date = datetime.now(timezone.utc)
-        ledger = (
-            self.session.query(SuppliesLedgerCard).with_for_update()
-            .filter_by(organization_id=org_id, item_id=item_id, location_id=location_id)
-            .first()
-        )
-        total_value = (qty_on_hand * (item.unit_price or 0))
-        if not ledger:
-            ledger = SuppliesLedgerCard(
-                organization_id=org_id,
-                item_id=item_id,
-                location_id=location_id,
-                ledger_number=f"SL-{org_id}-{item_id}-{location_id or 'G'}",
-                quantity_on_hand=qty_on_hand,
-                total_value=total_value,
-                last_received_date=(datetime.now(timezone.utc) if quantity > 0 else None),
-            )
-            self.session.add(ledger)
-        else:
-            ledger.quantity_on_hand = qty_on_hand
-            ledger.total_value = total_value
-            if quantity > 0:
-                ledger.last_received_date = datetime.now(timezone.utc)
 
         if commit:
             self.session.commit()

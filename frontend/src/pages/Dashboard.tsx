@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, TrendingUp, AlertTriangle, Package2, Landmark, BarChart3, Activity, Sparkles } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, AlertTriangle, Package2, Landmark, BarChart3, Activity, Sparkles, Warehouse } from 'lucide-react';
 import { StatsCard } from '../components/ui/StatsCard';
 import { MovementTrendsChart } from '../components/ui/MovementTrendsChart';
 import { useDashboardSummary, useAlerts, useDashboardMovements } from '../hooks/useDashboard';
-import { useWarehouses } from '../hooks/useWarehouses';
+import { useWarehouse } from '../context/WarehouseContext';
 import { cn } from '../lib/utils';
 import { asArray } from '../lib/apiResponse';
 import { motion } from 'framer-motion';
@@ -13,12 +13,10 @@ import { ErrorBoundary } from 'react-error-boundary';
 
 const Dashboard = () => {
   const [trendDays, setTrendDays] = useState(7);
-  const [selectedWarehouseId, setSelectedWarehouseId] = useState<number | undefined>(undefined);
-  const { data: summary, isLoading: summaryLoading } = useDashboardSummary(selectedWarehouseId);
+  const { activeWarehouse, activeWarehouseId } = useWarehouse();
+  const { data: summary, isLoading: summaryLoading } = useDashboardSummary(activeWarehouseId);
   const { data: alerts, isLoading: alertsLoading } = useAlerts();
-  const { data: movements, isLoading: movementsLoading } = useDashboardMovements(trendDays, selectedWarehouseId);
-  const { data: warehouses } = useWarehouses();
-  const warehouseList = asArray<{ warehouse_id: number; warehouse_name: string }>(warehouses);
+  const { data: movements, isLoading: movementsLoading } = useDashboardMovements(trendDays, activeWarehouseId);
   const alertList = asArray(alerts);
   const navigate = useNavigate();
 
@@ -37,30 +35,14 @@ const Dashboard = () => {
             </div>
             Operational Overview
           </h1>
-          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">Overview of your assets and inventory.</p>
+          <p className="text-slate-500 font-medium tracking-tight text-lg ml-1">
+            {activeWarehouse
+              ? <span className="flex items-center gap-2"><Warehouse className="w-4 h-4" /> Viewing: <strong>{activeWarehouse.name}</strong> ({activeWarehouse.is_main_warehouse ? 'HQ' : 'Branch'})</span>
+              : 'Aggregated view across all warehouses.'
+            }
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 relative z-10">
-          {/* Warehouse Dropdown */}
-          <div className="flex items-center gap-2 bg-white/80 backdrop-blur-md px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Facility:</span>
-            <select
-              value={selectedWarehouseId || ''}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSelectedWarehouseId(val ? Number(val) : undefined);
-              }}
-              className="bg-transparent border-none text-slate-700 font-bold focus:outline-none focus:ring-0 cursor-pointer text-sm"
-              style={{ fontFamily: 'Outfit' }}
-            >
-              <option value="">All Warehouses</option>
-              {warehouseList.map((wh) => (
-                <option key={wh.warehouse_id} value={wh.warehouse_id}>
-                  {wh.warehouse_name}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <button 
             onClick={() => navigate('/reports')}
             className="btn-secondary flex items-center gap-2 group"

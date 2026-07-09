@@ -420,24 +420,32 @@ class AnalyticsService:
         }
 
     @staticmethod
-    def get_recent_activity(org_id, limit=10):
-        """Get recent audit log stream."""
-        from app.models.inventory import AuditLog
-        
-        logs = db.session.query(AuditLog).filter_by(organisation_id=org_id).order_by(
-            AuditLog.created_at.desc()
-        ).limit(limit).all()
-        
-        return [
-            {
-                "id": log.id,
-                "action": log.action,
-                "entity_type": log.entity_type,
-                "details": log.details,
-                "created_at": log.created_at.isoformat()
-            }
-            for log in logs
-        ]
+    def get_recent_activity(org_id, limit=10, warehouse_id=None):
+        """Get recent audit log stream. Uses explicit columns for DB compatibility."""
+        from sqlalchemy import text
+
+        try:
+            # Use explicit columns to avoid crash when warehouse_id doesn't yet exist
+            sql = text("""
+                SELECT id, action, entity_type, details, created_at
+                FROM audit_logs
+                WHERE organisation_id = :org_id
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """)
+            rows = db.session.execute(sql, {'org_id': org_id, 'limit': limit}).fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "action": row[1],
+                    "entity_type": row[2],
+                    "details": row[3],
+                    "created_at": row[4].isoformat() if row[4] else None
+                }
+                for row in rows
+            ]
+        except Exception:
+            return []
 
     @staticmethod
     def generate_insights(org_id):
