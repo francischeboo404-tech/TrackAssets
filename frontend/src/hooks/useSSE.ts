@@ -4,6 +4,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { useLiveTracking } from '../context/LiveTrackingContext';
 import { baseWithApi } from '../services/api';
+import { getAccessToken } from '../lib/authStorage';
 
 export const useSSE = () => {
   const queryClient = useQueryClient();
@@ -14,7 +15,8 @@ export const useSSE = () => {
   useEffect(() => {
     if (!user) return; // Only connect if authenticated
 
-    const sseUrl = baseWithApi.replace(/\/+$/, '') + '/analytics/stream';
+    const token = getAccessToken();
+    const sseUrl = baseWithApi.replace(/\/+$/, '') + '/analytics/stream' + (token ? `?access_token=${encodeURIComponent(token)}` : '');
     const eventSource = new EventSource(sseUrl, { withCredentials: true } as any);
 
     eventSource.onmessage = (event) => {
