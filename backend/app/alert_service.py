@@ -121,7 +121,7 @@ class AlertService:
             ).start()
 
         # 3) Email alert (optional)
-        alert_email_to = current_app.config.get("ALERT_EMAIL_TO", "")
+        alert_email_to = current_app.config.get("ALERT_EMAIL_TO") or ""
         recipients = [e.strip() for e in alert_email_to.split(",") if e.strip()]
         if recipients and severity in ("CRITICAL", "ERROR"):
             subject = f"[TrackIT {severity}] {message[:80]}"
