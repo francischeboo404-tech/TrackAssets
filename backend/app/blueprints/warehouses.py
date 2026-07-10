@@ -140,21 +140,7 @@ def get_org_warehouse_summary():
     }
 
     # Org-wide aggregates
-    total_inventory_value = db.session.query(
-        func.coalesce(func.sum(
-            WarehouseStock.quantity_on_hand *
-            db.cast(db.session.query(db.func.coalesce(
-                db.literal_column('unit_price'), 0
-            )), db.Float)
-        ), 0)
-    ).scalar() or 0
-
-    # Simpler approach for inventory value
-    from app.models.inventory import InventoryItem
-    inv_items = InventoryItem.query.filter_by(organisation_id=org_id, is_active=True).all()
-    total_inventory_value = sum(
-        float(i.unit_price or 0) * int(i.quantity or 0) for i in inv_items
-    )
+    total_inventory_value = AnalyticsService.get_inventory_valuation(org_id)
 
     total_assets = Asset.query.filter_by(organisation_id=org_id).count()
     total_asset_value = db.session.query(
