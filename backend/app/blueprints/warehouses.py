@@ -154,13 +154,8 @@ def get_org_warehouse_summary():
     warehouse_details = []
     for wh in warehouses:
         metrics = utilization_map.get(wh.id, {})
-        wh_inv_value = db.session.query(
-            func.coalesce(func.sum(WarehouseStock.quantity_on_hand), 0)
-        ).filter_by(warehouse_id=wh.id).scalar() or 0
-        wh_assets = Asset.query.filter_by(organisation_id=org_id, warehouse_id=wh.id).count()
-        wh_asset_val = db.session.query(
-            func.coalesce(func.sum(Asset.current_value), 0)
-        ).filter_by(organisation_id=org_id, warehouse_id=wh.id).scalar() or 0
+        wh_summary = AnalyticsService.get_inventory_summary(org_id, warehouse_id=wh.id)
+        wh_asset_summary = AnalyticsService.get_asset_summary(org_id, warehouse_id=wh.id)
         wh_depts = Department.query.filter_by(organisation_id=org_id, warehouse_id=wh.id, is_active=True).count()
 
         warehouse_details.append({
@@ -171,9 +166,9 @@ def get_org_warehouse_summary():
             "is_main_warehouse": getattr(wh, 'is_main_warehouse', False),
             "warehouse_type": getattr(wh, 'warehouse_type', 'branch'),
             "hierarchy_level": getattr(wh, 'hierarchy_level', 1),
-            "stock_units": int(wh_inv_value),
-            "asset_count": wh_assets,
-            "asset_value": float(wh_asset_val),
+            "stock_units": int(wh_summary.get("total_items", 0)),
+            "asset_count": int(wh_asset_summary.get("total_assets", 0)),
+            "asset_value": float(wh_asset_summary.get("total_current_value", 0)),
             "department_count": wh_depts,
             "utilization_percentage": metrics.get("utilization_percentage", 0),
             "total_bins": metrics.get("total_bins", 0),
