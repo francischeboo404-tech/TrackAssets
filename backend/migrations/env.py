@@ -37,6 +37,13 @@ from app import create_app, db
 # access to the values within the .ini file in use.
 config = context.config
 
+
+print("=" * 60)
+print("config.config_file_name =", config.config_file_name)
+print("cwd =", os.getcwd())
+print("exists =", os.path.exists(config.config_file_name or ""))
+print("=" * 60)
+
 # Set sqlalchemy.url from app config (escaping '%' for configparser interpolation)
 flask_app = create_app(_flask_env)
 db_url = flask_app.config["SQLALCHEMY_DATABASE_URI"]
