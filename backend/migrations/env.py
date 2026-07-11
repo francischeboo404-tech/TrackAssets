@@ -46,13 +46,6 @@ ini_file = os.path.abspath(
     config.config_file_name
 ) if config.config_file_name else None
 
-print("=" * 60)
-print("config =", config.config_file_name)
-print("absolute =", ini_file)
-print("exists =", os.path.exists(ini_file) if ini_file else False)
-print("database =", db_url)
-print("=" * 60)
-
 if ini_file and os.path.exists(ini_file):
     fileConfig(ini_file)
 
