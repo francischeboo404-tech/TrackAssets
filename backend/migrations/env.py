@@ -5,15 +5,11 @@ from dotenv import load_dotenv
 # Add project root to path
 sys.path.append(os.getcwd())
 
-# Load environment variables (production uses .env.production)
-#_flask_env = os.environ.get("FLASK_ENV", "development")
-#load_dotenv()
-#if _flask_env == "production":
-#    load_dotenv(".env.production", override=True)
-
 BASE_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..")
 )
+
+_flask_env = os.environ.get("FLASK_ENV", "development")
 
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 
@@ -37,32 +33,29 @@ from app import create_app, db
 # access to the values within the .ini file in use.
 config = context.config
 
-
-print("=" * 60)
-print("config.config_file_name =", config.config_file_name)
-print("cwd =", os.getcwd())
-print("exists =", os.path.exists(config.config_file_name or ""))
-print("=" * 60)
-
-# Set sqlalchemy.url from app config (escaping '%' for configparser interpolation)
 flask_app = create_app(_flask_env)
+
 db_url = flask_app.config["SQLALCHEMY_DATABASE_URI"]
-if db_url:
-    db_url = db_url.replace("%", "%%")
-config.set_main_option("sqlalchemy.url", db_url)
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
-#if config.config_file_name is not None:
-#    fileConfig(config.config_file_name)
-if (
+config.set_main_option(
+    "sqlalchemy.url",
+    db_url.replace("%", "%%")
+)
+
+ini_file = os.path.abspath(
     config.config_file_name
-    and os.path.exists(config.config_file_name)
-):
-    fileConfig(config.config_file_name)
+) if config.config_file_name else None
 
-# add your model's MetaData object here
-# for 'autogenerate' support
+print("=" * 60)
+print("config =", config.config_file_name)
+print("absolute =", ini_file)
+print("exists =", os.path.exists(ini_file) if ini_file else False)
+print("database =", db_url)
+print("=" * 60)
+
+if ini_file and os.path.exists(ini_file):
+    fileConfig(ini_file)
+
 target_metadata = db.metadata
 
 # other values from the config, defined by the needs of env.py,
