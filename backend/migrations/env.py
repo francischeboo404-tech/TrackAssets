@@ -7,9 +7,21 @@ sys.path.append(os.getcwd())
 
 # Load environment variables (production uses .env.production)
 _flask_env = os.environ.get("FLASK_ENV", "development")
-load_dotenv()
+#load_dotenv()
+#if _flask_env == "production":
+#    load_dotenv(".env.production", override=True)
+
+BASE_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
+)
+
+load_dotenv(os.path.join(BASE_DIR, ".env"))
+
 if _flask_env == "production":
-    load_dotenv(".env.production", override=True)
+    load_dotenv(
+        os.path.join(BASE_DIR, ".env.production"),
+        override=True,
+    )
 
 from logging.config import fileConfig
 
@@ -34,7 +46,12 @@ config.set_main_option("sqlalchemy.url", db_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-if config.config_file_name is not None:
+#if config.config_file_name is not None:
+#    fileConfig(config.config_file_name)
+if (
+    config.config_file_name
+    and os.path.exists(config.config_file_name)
+):
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
