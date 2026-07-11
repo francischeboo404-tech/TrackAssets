@@ -1,7 +1,7 @@
 """Add asset_id and item_type columns to goods_receipt_items
 
 Revision ID: add_asset_support_grn
-Revises: ef332df3c6b4, 06_add_warehouse_id_inventory, add_employee_item_tracking
+Revises: 06_add_warehouse_id_inventory, add_employee_item_tracking
 """
 
 from alembic import op
@@ -10,7 +10,6 @@ from sqlalchemy import inspect
 
 revision = "add_asset_support_grn"
 down_revision = (
-    "ef332df3c6b4",
     "06_add_warehouse_id_inventory",
     "add_employee_item_tracking",
 )
