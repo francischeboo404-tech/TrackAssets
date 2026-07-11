@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 sys.path.append(os.getcwd())
 
 # Load environment variables (production uses .env.production)
-_flask_env = os.environ.get("FLASK_ENV", "development")
+#_flask_env = os.environ.get("FLASK_ENV", "development")
 #load_dotenv()
 #if _flask_env == "production":
 #    load_dotenv(".env.production", override=True)
