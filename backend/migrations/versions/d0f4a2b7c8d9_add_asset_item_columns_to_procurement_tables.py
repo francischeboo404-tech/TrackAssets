@@ -16,17 +16,17 @@ depends_on = None
 
 def upgrade():
     for table_name in ['purchase_request_items', 'purchase_order_items', 'requisition_items']:
+        columns = [c["name"] for c in inspector.get_columns(table_name)]
         #op.add_column(table_name, sa.Column('asset_id', sa.Integer(), nullable=True))
-        #if "asset_id" not in columns:
-        #    op.add_column(table_name, sa.Column("asset_id", sa.Integer(), nullable=True))
-        op.add_column(table_name, sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
-
-    op.add_column('goods_receipt_items', sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
+        if "asset_id" not in columns: op.add_column(table_name, sa.Column("asset_id", sa.Integer(), nullable=True))
+        if "item_type" not in columns: op.add_column(table_name, sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
+    columns = [c["name"] for c in inspector.get_columns("goods_receipt_items")]
+    if "item_type" not in columns: op.add_column('goods_receipt_items', sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
 
     op.add_column('requisition_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
     op.add_column('requisition_items', sa.Column('bin_id', sa.Integer(), nullable=True))
 
-    op.add_column('goods_receipt_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
+    if "warehouse_id" not in columns: op.add_column('goods_receipt_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
 
 
 def downgrade():
