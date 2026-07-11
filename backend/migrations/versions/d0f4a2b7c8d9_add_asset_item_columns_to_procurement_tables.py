@@ -7,6 +7,8 @@ Create Date: 2026-07-07 23:55:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
+conn = op.get_bind()
+inspector = inspect(conn)
 
 revision = 'd0f4a2b7c8d9'
 down_revision = 'add_asset_support_grn'
@@ -20,13 +22,26 @@ def upgrade():
         #op.add_column(table_name, sa.Column('asset_id', sa.Integer(), nullable=True))
         if "asset_id" not in columns: op.add_column(table_name, sa.Column("asset_id", sa.Integer(), nullable=True))
         if "item_type" not in columns: op.add_column(table_name, sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
-    columns = [c["name"] for c in inspector.get_columns("goods_receipt_items")]
-    if "item_type" not in columns: op.add_column('goods_receipt_items', sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
+    grn_columns = [c["name"] for c in inspector.get_columns("goods_receipt_items")]
+    if "item_type" not in grn_columns: op.add_column('goods_receipt_items', sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
 
-    op.add_column('requisition_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
-    op.add_column('requisition_items', sa.Column('bin_id', sa.Integer(), nullable=True))
+    req_columns = [c["name"] for c in inspector.get_columns("requisition_items")]
 
-    if "warehouse_id" not in columns: op.add_column('goods_receipt_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
+    if "warehouse_id" not in req_columns:
+        op.add_column(
+            "requisition_items",
+            sa.Column("warehouse_id", sa.Integer(), nullable=True)
+        )
+    
+    if "bin_id" not in req_columns:
+        op.add_column(
+            "requisition_items",
+            sa.Column("bin_id", sa.Integer(), nullable=True)
+        )
+    #op.add_column('requisition_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
+    #op.add_column('requisition_items', sa.Column('bin_id', sa.Integer(), nullable=True))
+
+    if "warehouse_id" not in grn_columns: op.add_column('goods_receipt_items', sa.Column('warehouse_id', sa.Integer(), nullable=True))
 
 
 def downgrade():
