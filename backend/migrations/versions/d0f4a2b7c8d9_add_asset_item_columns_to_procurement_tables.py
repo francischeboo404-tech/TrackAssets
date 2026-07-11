@@ -1,7 +1,20 @@
+"""Add asset-aware columns to procurement and requisition tables
+
+Revision ID: d0f4a2b7c8d9
+Revises: add_asset_support_grn
+Create Date: 2026-07-07 23:55:00.000000
+
+"""
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
+# revision identifiers, used by Alembic.
+revision = "d0f4a2b7c8d9"
+down_revision = "add_asset_support_grn"
+branch_labels = None
+depends_on = None
 
 def _column_exists(inspector, table_name, column_name):
     return column_name in {c["name"] for c in inspector.get_columns(table_name)}
