@@ -16,7 +16,9 @@ depends_on = None
 
 def upgrade():
     for table_name in ['purchase_request_items', 'purchase_order_items', 'requisition_items']:
-        op.add_column(table_name, sa.Column('asset_id', sa.Integer(), nullable=True))
+        #op.add_column(table_name, sa.Column('asset_id', sa.Integer(), nullable=True))
+        #if "asset_id" not in columns:
+        #    op.add_column(table_name, sa.Column("asset_id", sa.Integer(), nullable=True))
         op.add_column(table_name, sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
 
     op.add_column('goods_receipt_items', sa.Column('item_type', sa.String(length=50), nullable=False, server_default='inventory'))
