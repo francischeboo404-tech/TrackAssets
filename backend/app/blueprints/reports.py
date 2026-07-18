@@ -73,6 +73,13 @@ def report_inventory():
     dept_id = request.args.get("department_id", type=int)
     warehouse_id = request.args.get("warehouse_id", type=int)
     department_name = _department_scope()
+    
+    if department_name and not dept_id:
+        from app.models.organization import Department
+        dept = Department.query.filter_by(name=department_name, organisation_id=org_id, is_active=True).first()
+        if dept:
+            dept_id = dept.id
+
     role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
     cache_key = f"reports:inventory:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
 
@@ -81,7 +88,7 @@ def report_inventory():
         return _report_json(cached_data)
 
     data = ReportAnalyticsService.get_inventory_report(
-        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
+        org_id, days=days, department_id=dept_id, warehouse_id=warehouse_id
     )
     data = filter_report_payload(g.user.role, "inventory", data)
     cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
@@ -99,6 +106,13 @@ def report_tracking():
     dept_id = request.args.get("department_id", type=int)
     warehouse_id = request.args.get("warehouse_id", type=int)
     department_name = _department_scope()
+    
+    if department_name and not dept_id:
+        from app.models.organization import Department
+        dept = Department.query.filter_by(name=department_name, organisation_id=org_id, is_active=True).first()
+        if dept:
+            dept_id = dept.id
+
     role_name = g.user.role.name if g.user and hasattr(g.user.role, 'name') else str(getattr(g.user, 'role', 'user'))
     cache_key = f"reports:tracking:{org_id}:{warehouse_id}:{dept_id}:{days}:{role_name}"
 
@@ -107,7 +121,7 @@ def report_tracking():
         return _report_json(cached_data)
 
     data = ReportAnalyticsService.get_tracking_report(
-        org_id, days=days, department_name=department_name, warehouse_id=warehouse_id
+        org_id, days=days, department_id=dept_id, warehouse_id=warehouse_id
     )
     data = filter_report_payload(g.user.role, "tracking", data)
     cache.set(cache_key, data, ttl=CACHE_TTL_REPORTS)
