@@ -17,6 +17,20 @@ class Category(db.Model):
     updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
 
+class ItemType(db.Model):
+    __tablename__ = 'item_types'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    organization_id = db.Column(db.Integer, db.ForeignKey('organizations.id'), nullable=False)
+    name = db.Column(db.String(50), nullable=False)
+    description = db.Column(db.Text)
+    
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+
 class Role(db.Model):
     __tablename__ = 'roles'
     
