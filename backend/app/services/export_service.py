@@ -26,7 +26,7 @@ class ExportService:
         org_name = ExportService._org_name(org_id)
 
         movements = (
-            StockMovement.query.options(joinedload(StockMovement.item))
+            StockMovement.query.options(joinedload(StockMovement.inventory_item))
             .join(InventoryItem)
             .filter(
                 InventoryItem.organisation_id == org_id,
@@ -48,8 +48,8 @@ class ExportService:
         rows = [
             [
                 m.date.isoformat() if m.date else "",
-                m.item.name if m.item else "",
-                m.item.sku if m.item else "",
+                m.inventory_item.name if m.inventory_item else "",
+                m.inventory_item.sku if m.inventory_item else "",
                 m.type,
                 m.quantity,
                 m.reference or "",
