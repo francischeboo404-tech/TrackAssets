@@ -15,14 +15,10 @@ export const useSSE = () => {
   useEffect(() => {
     if (!user) return; // Only connect if authenticated
 
-    const token = getAccessToken();
-    const sseUrl = baseWithApi.replace(/\/+$/, '') + '/analytics/stream' + (token ? `?access_token=${encodeURIComponent(token)}` : '');
+    const sseUrl = `${baseWithApi.replace(/\/+$/, '')}/analytics/stream?access_token=${getAccessToken() || ''}`;
+    const eventSource = new EventSource(sseUrl, { withCredentials: true } as any);
 
-    let eventSource: EventSource | null = null;
-    let retryTimeout: number | null = null;
-    let mounted = true;
-
-    const handleMessage = (event: MessageEvent) => {
+    eventSource.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         console.log('Real-time event received:', payload);
@@ -110,70 +106,12 @@ export const useSSE = () => {
       }
     };
 
-    const connect = async () => {
-      if (!mounted) return;
-
-      try {
-        console.log('Probing SSE endpoint:', sseUrl);
-        const res = await fetch(sseUrl, {
-          method: 'GET',
-          headers: { Accept: 'text/event-stream' },
-          credentials: 'include',
-        });
-
-        if (!mounted) return;
-
-        if (!res.ok) {
-          console.warn('SSE probe failed, status:', res.status);
-          if (retryTimeout) window.clearTimeout(retryTimeout);
-          retryTimeout = window.setTimeout(connect, 5000);
-          return;
-        }
-
-        console.log('SSE probe successful, opening EventSource');
-        eventSource = new EventSource(sseUrl, { withCredentials: true } as any);
-
-        eventSource.onopen = () => {
-          console.log('SSE connection opened');
-          if (retryTimeout) {
-            window.clearTimeout(retryTimeout);
-            retryTimeout = null;
-          }
-        };
-
-        eventSource.onmessage = handleMessage;
-
-        eventSource.onerror = (err) => {
-          console.error('SSE connection error:', err);
-          try {
-            eventSource?.close();
-          } catch (e) {
-            // ignore
-          }
-          eventSource = null;
-          if (mounted) {
-            retryTimeout = window.setTimeout(connect, 5000);
-          }
-        };
-      } catch (err) {
-        console.error('SSE probe error:', err);
-        if (mounted) {
-          if (retryTimeout) window.clearTimeout(retryTimeout);
-          retryTimeout = window.setTimeout(connect, 5000);
-        }
-      }
+    eventSource.onerror = (err) => {
+      console.error('SSE connection error:', err);
     };
-
-    connect();
 
     return () => {
-      mounted = false;
-      if (retryTimeout) window.clearTimeout(retryTimeout);
-      try {
-        eventSource?.close();
-      } catch (e) {
-        // ignore
-      }
+      eventSource.close();
     };
-  }, [queryClient, addToast, updatePosition, user]);
+  }, [queryClient, addToast, updatePosition]);
 };
