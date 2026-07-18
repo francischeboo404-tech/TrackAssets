@@ -28,10 +28,15 @@ def create_item_type():
     if existing:
         return jsonify({"success": False, "message": f"Item Type '{name}' already exists"}), 400
 
+    from app.auth_utils import get_current_user_id
+    user_id = get_current_user_id()
+
     item_type = ItemType(
         organization_id=org_id,
         name=name,
         description=description or None,
+        created_by=user_id,
+        updated_by=user_id,
     )
     db.session.add(item_type)
     db.session.commit()
