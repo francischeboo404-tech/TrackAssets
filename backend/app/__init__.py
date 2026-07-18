@@ -18,9 +18,6 @@ db = SQLAlchemy()
 jwt = JWTManager()
 mail = Mail()
 
-from flask_migrate import Migrate
-
-migrate = Migrate()
 
 # Rate Limiting
 storage_uri = os.environ.get("RATELIMIT_STORAGE_URL", "memory://")
@@ -60,7 +57,6 @@ def create_app(config_name=None):
         app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL") or "sqlite:///trackit_dev.db"
 
     db.init_app(app)
-    migrate.init_app(app, db)
 
     # Configure SQLite to use WAL mode and busy timeout to prevent "database is locked" errors
     from sqlalchemy import event
@@ -168,6 +164,7 @@ def create_app(config_name=None):
         reports_bp = _import_bp("reports")
         warehouses_bp = _import_bp("warehouses")
         suppliers_bp = _import_bp("suppliers")
+        item_types_bp = _import_bp("item_types")
         settings_bp = _import_bp("settings")
         search_bp = _import_bp("search")
 
@@ -195,6 +192,7 @@ def create_app(config_name=None):
         app.register_blueprint(suppliers_bp, url_prefix="/api/suppliers")
         categories_bp = _import_bp("categories")
         app.register_blueprint(categories_bp, url_prefix="/api/categories")
+        app.register_blueprint(item_types_bp, url_prefix="/api/item-types")
         app.register_blueprint(reports_bp, url_prefix="/api/reports")
         app.register_blueprint(settings_bp, url_prefix="/api/settings")
         app.register_blueprint(search_bp, url_prefix="/api/search")
@@ -511,10 +509,15 @@ def create_app(config_name=None):
             "form-action": ["'self'"],
         }
         
+        # Check if FORCE_HTTPS is explicitly disabled in the environment.
+        # This is useful for local development even when testing production config.
+        env_force_https = os.environ.get("FORCE_HTTPS", "true").lower() in ("true", "1", "yes")
+        force_https_setting = (config_name == "production") and env_force_https
+
         Talisman(
             app,
             content_security_policy=csp,
-            force_https=(config_name == "production"), 
+            force_https=force_https_setting, 
             strict_transport_security=True,
             strict_transport_security_max_age=31536000,  # 1 year
             strict_transport_security_include_subdomains=True,
