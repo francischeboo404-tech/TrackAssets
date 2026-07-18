@@ -17,6 +17,8 @@ from sqlalchemy import text as sa_text
 db = SQLAlchemy()
 jwt = JWTManager()
 mail = Mail()
+from flask_migrate import Migrate
+migrate = Migrate()
 
 
 # Rate Limiting
@@ -57,6 +59,7 @@ def create_app(config_name=None):
         app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL") or "sqlite:///trackit_dev.db"
 
     db.init_app(app)
+    migrate.init_app(app, db)
 
     # Configure SQLite to use WAL mode and busy timeout to prevent "database is locked" errors
     from sqlalchemy import event
