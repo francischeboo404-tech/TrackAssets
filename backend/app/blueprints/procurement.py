@@ -216,7 +216,7 @@ def list_purchase_orders():
 
     pos = ProcurementService.list_purchase_orders(
         org_id,
-        statuses=requested_statuses or ['approved', 'partially_received', 'received'],
+        statuses=requested_statuses,
         include_inactive=include_inactive,
     )
     return (
