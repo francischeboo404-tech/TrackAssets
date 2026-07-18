@@ -3,11 +3,12 @@ import api from '../services/api';
 
 export const usePurchaseOrders = (options?: { statuses?: string[]; includeInactive?: boolean }) => {
   return useQuery({
-    queryKey: ['purchase_orders', options?.statuses ?? ['approved','partially_received','received'], options?.includeInactive ?? false],
+    queryKey: ['purchase_orders', options?.statuses ?? [], options?.includeInactive ?? false],
     queryFn: async () => {
       const params = new URLSearchParams();
-      const statuses = options?.statuses ?? ['approved', 'partially_received', 'received'];
-      statuses.forEach((status) => params.append('status', status));
+      if (options?.statuses) {
+        options.statuses.forEach((status) => params.append('status', status));
+      }
       if (options?.includeInactive) {
         params.set('include_inactive', 'true');
       }
