@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCreateInventoryItem } from "../../hooks/useInventory";
 import { useCategories, useCreateCategory } from "../../hooks/useCategories";
+import { useItemTypes, useCreateItemType } from "../../hooks/useItemTypes";
 import { useSuppliers } from "../../hooks/useSuppliers";
 import { useWarehouses } from "../../hooks/useWarehouses";
 import { useToast } from "../../context/ToastContext";
@@ -34,8 +35,11 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
   const { addToast } = useToast();
   const createItem = useCreateInventoryItem();
   const createCategory = useCreateCategory();
+  const createItemType = useCreateItemType();
   const { data: categoriesData, isLoading: isCategoriesLoading } =
     useCategories() as any;
+  const { data: itemTypesData, isLoading: isItemTypesLoading } =
+    useItemTypes() as any;
   const { data: suppliersData, isLoading: isSuppliersLoading } =
     useSuppliers() as any;
   const categories = Array.isArray(categoriesData)
@@ -43,6 +47,9 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
     : Array.isArray(categoriesData?.categories)
       ? categoriesData.categories
       : [];
+  const itemTypesList = Array.isArray(itemTypesData?.item_types)
+    ? itemTypesData.item_types
+    : [];
   const suppliers = Array.isArray(suppliersData?.suppliers)
     ? suppliersData.suppliers
     : [];
@@ -83,6 +90,8 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
 
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryDescription, setNewCategoryDescription] = useState("");
+  const [newItemTypeName, setNewItemTypeName] = useState("");
+  const [newItemTypeDescription, setNewItemTypeDescription] = useState("");
   const [formData, setFormData] = useState<InventoryFormData>({
     name: "",
     sku: "",
@@ -142,6 +151,38 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
         "error",
         "Category Creation Failed",
         err?.response?.data?.message || "Unable to create category",
+      );
+    }
+  };
+
+  const handleCreateItemType = async () => {
+    const trimmedName = newItemTypeName.trim();
+    if (!trimmedName) {
+      addToast("error", "Validation Error", "Item Type name is required");
+      return;
+    }
+
+    try {
+      const result = await createItemType.mutateAsync({
+        name: trimmedName,
+        description: newItemTypeDescription.trim(),
+      });
+      const createdTypeName = result?.item_type?.name;
+      if (createdTypeName) {
+        setFormData((prev) => ({ ...prev, item_type: createdTypeName as InventoryItemType }));
+      }
+      setNewItemTypeName("");
+      setNewItemTypeDescription("");
+      addToast(
+        "success",
+        "Item Type Added",
+        `${trimmedName} is now available for inventory.`,
+      );
+    } catch (err: any) {
+      addToast(
+        "error",
+        "Item Type Creation Failed",
+        err?.response?.data?.message || "Unable to create item type",
       );
     }
   };
@@ -411,14 +452,41 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
                 onChange={(e) =>
                   setFormData({ ...formData, item_type: e.target.value as any })
                 }
+                disabled={isItemTypesLoading}
               >
-                <option value="consumable">Consumable</option>
-                <option value="asset">Asset</option>
-                <option value="raw">Raw Material</option>
-                <option value="finished">Finished Product</option>
-                <option value="service">Service</option>
-                <option value="other">Other</option>
+                <option value="">Select Item Type</option>
+                {itemTypesList.map((type: any) => (
+                  <option key={type.id} value={type.id}>
+                    {type.name} {type.is_custom ? "(Custom)" : ""}
+                  </option>
+                ))}
               </select>
+              <div className="mt-2 space-y-2 rounded-lg border border-slate-200 p-3 bg-slate-50">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                  Add New Item Type
+                </label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="New item type name"
+                  value={newItemTypeName}
+                  onChange={(e) => setNewItemTypeName(e.target.value)}
+                />
+                <textarea
+                  className="input-field h-16 resize-none"
+                  placeholder="Optional description"
+                  value={newItemTypeDescription}
+                  onChange={(e) => setNewItemTypeDescription(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={handleCreateItemType}
+                  disabled={createItemType.isPending}
+                  className="btn-secondary w-full"
+                >
+                  {createItemType.isPending ? "Saving..." : "Add Item Type"}
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -602,7 +670,7 @@ export const InventoryModal: React.FC<InventoryModalProps> = ({
           <legend className="text-sm font-bold text-slate-700 mb-3">
             Stock Levels & Thresholds
           </legend>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
                 <AlertTriangle className="w-3 h-3" /> Reorder Level
