@@ -7,6 +7,7 @@ from app.models.organization import Organization
 from app.models.stock_levels import WarehouseStock
 from app.services.stock_service import StockService
 from app.utils.formatted_export import build_csv_document, format_status_label
+from app import db
 
 
 class ExportService:
