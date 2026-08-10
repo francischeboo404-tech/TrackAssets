@@ -23,7 +23,7 @@ def client(app):
 
 def test_supplier_crud_flow(app, client):
     # Create org
-    org = Organization(name=" ", code=" ")
+    org = Organization(name="Test Suppliers Organization", code="TEST-ORG-001")
     db.session.add(org)
     db.session.commit()
 
@@ -31,25 +31,30 @@ def test_supplier_crud_flow(app, client):
     with public_schema():
         u = user_model.User(
             organisation_id=org.id,
-            username=" ",
-            email=" ",
-            first_name=" ",
-            last_name=" ",
-            role=" ",
+            username="test_supplier_admin",
+            email="admin@supplierstest.com",
+            first_name="Test",
+            last_name="Admin",
+            role="admin",
         )
-        u.set_password(" ")
+        u.set_password("TestPassword123!")
         db.session.add(u)
         db.session.commit()
 
     # Login
-    login_resp = client.post("/api/auth/login", json={"email": "sup_admin@example.com", "password": "Admin123!"})
+    login_resp = client.post("/api/auth/login", json={"email": "admin@supplierstest.com", "password": "TestPassword123!"})
     assert login_resp.status_code == 200
     token = login_resp.get_json().get("access_token")
     assert token
     headers = {"Authorization": f"Bearer {token}"}
 
     # Create supplier
-    payload = {"name": " ", "code": " ", "email": " ", "phone": "+254700000000"}
+    payload = {
+        "name": "Acme Manufacturing Ltd",
+        "code": "ACME-001",
+        "email": "contact@acmemfg.com",
+        "phone": "+254700000000"
+    }
     res = client.post("/api/suppliers", json=payload, headers=headers)
     assert res.status_code == 201
     data = res.get_json()
