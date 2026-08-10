@@ -77,7 +77,7 @@ def record_scan():
         validated_data["notes"] = sanitize_string(validated_data["notes"])
 
     try:
-        item, event = TrackingService.record_scan(
+        item, event, anomalies = TrackingService.record_scan(
             org_id=org_id,
             user_id=g.user.id,
             user_role=g.user.role,
@@ -85,7 +85,6 @@ def record_scan():
         )
 
         history = TrackingService.get_history(org_id, event.item_type, item.id)
-        anomalies = AnomalyService.analyze_scan(event)
 
         return (
             jsonify(
@@ -223,3 +222,28 @@ def get_allowed_scan_actions():
         if role in roles or role in ("admin", "superadmin")
     ]
     return jsonify({"role": role, "actions": actions}), 200
+
+
+@tracking_bp.route("/misplaced-items", methods=["GET"])
+@jwt_required_with_user
+@limiter.limit("30 per minute")
+def get_misplaced_items():
+    """Get a list of misplaced items across the organization."""
+    org_id = get_current_organisation_id()
+    limit = request.args.get("limit", default=50, type=int)
+
+    try:
+        misplaced = AnomalyService.predict_misplaced_items(org_id, limit=limit)
+        return (
+            jsonify(
+                {
+                    "misplaced_items": misplaced,
+                    "count": len(misplaced),
+                    "total": len(misplaced),
+                }
+            ),
+            200,
+        )
+    except Exception as e:
+        current_app.logger.exception("Error fetching misplaced items")
+        return jsonify({"message": "Error fetching misplaced items"}), 500
