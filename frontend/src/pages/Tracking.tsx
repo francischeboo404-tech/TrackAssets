@@ -15,6 +15,7 @@ import {
 } from '../hooks/useTracking';
 import { useLiveTracking } from '../context/LiveTrackingContext';
 import { TrackingTimeline } from '../components/ui/TrackingTimeline';
+import { MisplacedItemsCard } from '../components/ui/MisplacedItemsCard';
 import { canPerformScanAction, isReadOnlyScanner } from '../lib/permissions';
 import { cn } from '../lib/utils';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -259,6 +260,14 @@ const Tracking = () => {
                <strong>Authenticated Access Only:</strong> This item is secured by TrackIT. Scans from outside this application require institutional login to reveal tracking data.
              </p>
           </div>
+
+          {/* Phase 5: Misplaced Items Card */}
+          <MisplacedItemsCard
+            limit={5}
+            onItemClick={(item) => {
+              addToast('info', 'Item Details', `${item.item_name}: ${item.message}`);
+            }}
+          />
 
           {/* Main Scanner Card */}
           <div className="enterprise-card p-6 bg-white shadow-xl border-none">
