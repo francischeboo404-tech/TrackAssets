@@ -335,8 +335,53 @@ class TrackingService:
             organisation_id=org_id,
         )
 
+        # Real-time anomaly detection and publishing to SSE bus
+        from app.services.anomaly_service import AnomalyService
+
+        # Compute scan-specific anomalies once for both SSE publishing and response
+        scan_anomalies = AnomalyService.analyze_scan(event)
+
+        # Publish scan-specific anomalies (impossible travel, etc.) to SSE
+        if scan_anomalies:
+            for anomaly in scan_anomalies:
+                event_bus.publish(
+                    "SCAN_ANOMALY_DETECTED",
+                    {
+                        "type": anomaly["type"],
+                        "severity": anomaly.get("severity", "MEDIUM"),
+                        "item_id": item.id,
+                        "item_type": item_type,
+                        "message": anomaly["message"],
+                    },
+                    organisation_id=org_id,
+                )
+
+        # Per-scan misplaced items detection
+        if current_app.config.get("ENABLE_MISPLACED_DETECTION_PER_SCAN", False):
+            misplaced = AnomalyService.predict_misplaced_items(org_id, limit=5)
+            if misplaced:
+                for anomaly in misplaced:
+                    event_bus.publish(
+                        "MISPLACED_ITEM_DETECTED",
+                        {
+                            "type": "MISPLACED_ITEM",
+                            "severity": anomaly["severity"],
+                            "item_type": anomaly["item_type"],
+                            "item_id": anomaly["item_id"],
+                            "item_name": anomaly["item_name"],
+                            "item_code": anomaly.get("item_code"),
+                            "expected_location": anomaly["expected_location"],
+                            "actual_location": anomaly["actual_location"],
+                            "days_since_scan": anomaly["days_since_scan"],
+                            "message": anomaly["message"],
+                        },
+                        organisation_id=org_id,
+                    )
+
         sess.commit()
-        return item, event
+
+        # Return the scan result with anomalies (already computed above)
+        return item, event, scan_anomalies
 
     @staticmethod
     def verify_scan(org_id, user_id, user_role, qr_data):
