@@ -76,7 +76,398 @@ class AnomalyService:
         return duplicates
 
     @staticmethod
-    def predict_misplaced_items(org_id):
-        """Identify items whose current location doesn't match their assigned department/expected location."""
-        # This is a bit more complex as it requires cross-referencing Asset.department_id
-        # with the latest ScanEvent.warehouse_id/bin_id.
+    def predict_misplaced_items(org_id, limit=None):
+        """
+        Identify items whose current location doesn't match their expected location.
+
+        Cross-references three item types (Asset, InventoryItem, ItemInstance) with their
+        latest ScanEvent records to detect misplaced items.
+
+        Args:
+            org_id: Organization ID (tenant isolation)
+            limit: Optional max results to return (for pagination)
+
+        Returns:
+            List of anomaly dicts, sorted by severity (HIGH first) and staleness
+        """
+        from app.models.asset import Asset, AssetStatus
+        from app.models.inventory import InventoryItem
+        from app.models.item_instance import ItemInstance
+        from app.models.location_topology import Warehouse
+        from app.models.organization import Department
+        from app.models.user import User
+        from sqlalchemy import func, and_, or_
+
+        anomalies = []
+
+        # =====================================================================
+        # QUERY STRATEGY: Batch fetch latest scans for each item type
+        # =====================================================================
+        # This avoids N+1 queries and uses existing indexes on ScanEvent
+
+        def get_latest_scans_per_item(item_type):
+            """Get latest verified scan for each item of a type."""
+            subq = (
+                ScanEvent.query.with_entities(
+                    ScanEvent.item_type,
+                    ScanEvent.item_id,
+                    func.max(ScanEvent.timestamp).label("latest"),
+                )
+                .filter(
+                    ScanEvent.organisation_id == org_id,
+                    ScanEvent.item_type == item_type,
+                    ScanEvent.validation_status == "verified",
+                )
+                .group_by(ScanEvent.item_type, ScanEvent.item_id)
+                .subquery()
+            )
+
+            events = (
+                ScanEvent.query.join(
+                    subq,
+                    and_(
+                        ScanEvent.item_type == subq.c.item_type,
+                        ScanEvent.item_id == subq.c.item_id,
+                        ScanEvent.timestamp == subq.c.latest,
+                    ),
+                )
+                .filter(ScanEvent.organisation_id == org_id)
+                .all()
+            )
+
+            return {event.item_id: event for event in events}
+
+        # =====================================================================
+        # ASSET MISPLACED DETECTION
+        # =====================================================================
+
+        skip_asset_statuses = [
+            AssetStatus.DISPOSED.value,
+            AssetStatus.LOST.value,
+            AssetStatus.DAMAGED.value,
+        ]
+
+        assets = Asset.query.filter(
+            Asset.organisation_id == org_id,
+            ~Asset.status.in_(skip_asset_statuses),
+        ).all()
+
+        asset_scans = get_latest_scans_per_item("asset")
+
+        for asset in assets:
+            # Resolve expected warehouse based on assignment hierarchy
+            expected_warehouse_id = None
+            assignment_type = None
+
+            # Priority 1: Assigned to user
+            if asset.assigned_to_user_id:
+                user = User.query.get(asset.assigned_to_user_id)
+                if user and user.department_id:
+                    dept = Department.query.get(user.department_id)
+                    if dept and dept.warehouse_id:
+                        expected_warehouse_id = dept.warehouse_id
+                        assignment_type = "assigned_to_user"
+
+            # Priority 2: Assigned to department
+            if not expected_warehouse_id and asset.assigned_department_id:
+                dept = Department.query.get(asset.assigned_department_id)
+                if dept and dept.warehouse_id:
+                    expected_warehouse_id = dept.warehouse_id
+                    assignment_type = "assigned_to_department"
+
+            # Priority 3: Home department
+            if not expected_warehouse_id and asset.department_id:
+                dept = Department.query.get(asset.department_id)
+                if dept and dept.warehouse_id:
+                    expected_warehouse_id = dept.warehouse_id
+                    assignment_type = "home_department"
+
+            # Skip: Cannot determine expected location
+            if not expected_warehouse_id:
+                continue
+
+            expected_warehouse = Warehouse.query.get(expected_warehouse_id)
+            expected_wh_name = (
+                expected_warehouse.name
+                if expected_warehouse
+                else f"WH_{expected_warehouse_id}"
+            )
+
+            # Get latest scan
+            latest_scan = asset_scans.get(asset.id)
+
+            # Detect misplacement
+            is_misplaced = False
+            severity = None
+            message = None
+
+            if latest_scan is None:
+                # No scan history
+                is_misplaced = True
+                severity = "HIGH"
+                message = f"{asset.asset_code} has no scan history. Location unknown."
+                days_since_scan = None
+            else:
+                days_since_scan = (datetime.utcnow() - latest_scan.timestamp).days
+
+                if latest_scan.warehouse_id != expected_warehouse_id:
+                    # Different warehouse entirely
+                    is_misplaced = True
+                    severity = "HIGH"
+                    actual_wh = Warehouse.query.get(latest_scan.warehouse_id)
+                    actual_wh_name = (
+                        actual_wh.name if actual_wh else f"WH_{latest_scan.warehouse_id}"
+                    )
+                    message = f"{asset.asset_code} expected in {expected_wh_name} but found in {actual_wh_name}"
+
+                elif latest_scan.bin_id and asset.bin_id:
+                    # Same warehouse, check bin level
+                    if latest_scan.bin_id != asset.bin_id:
+                        is_misplaced = True
+                        severity = "MEDIUM"
+                        message = f"{asset.asset_code} in {expected_wh_name} but wrong bin (scan: {latest_scan.bin_id} vs expected: {asset.bin_id})"
+
+                # Adjust severity for stale data (> 30 days)
+                if is_misplaced and days_since_scan > 30:
+                    if severity == "HIGH":
+                        message += f" (Last scanned {days_since_scan} days ago)"
+                    else:
+                        severity = "LOW"
+                        message += f" (Last scanned {days_since_scan} days ago)"
+
+            if is_misplaced:
+                actual_warehouse = (
+                    Warehouse.query.get(latest_scan.warehouse_id)
+                    if latest_scan and latest_scan.warehouse_id
+                    else None
+                )
+                actual_wh_name = (
+                    actual_warehouse.name if actual_warehouse else "Unknown"
+                )
+
+                anomalies.append(
+                    {
+                        "type": "MISPLACED_ITEM",
+                        "severity": severity,
+                        "item_type": "asset",
+                        "item_id": asset.id,
+                        "item_name": asset.name,
+                        "item_code": asset.asset_code,
+                        "expected_location": {
+                            "warehouse_id": expected_warehouse_id,
+                            "warehouse_name": expected_wh_name,
+                        },
+                        "actual_location": {
+                            "warehouse_id": latest_scan.warehouse_id if latest_scan else None,
+                            "warehouse_name": actual_wh_name if latest_scan else "No scan data",
+                            "bin_id": latest_scan.bin_id if latest_scan else None,
+                            "timestamp": latest_scan.timestamp.isoformat() if latest_scan else None,
+                        },
+                        "days_since_scan": days_since_scan,
+                        "message": message,
+                        "assignment_type": assignment_type,
+                    }
+                )
+
+        # =====================================================================
+        # INVENTORY ITEM MISPLACED DETECTION
+        # =====================================================================
+
+        inventory_items = InventoryItem.query.filter(
+            InventoryItem.organisation_id == org_id,
+            InventoryItem.is_active == True,
+            InventoryItem.warehouse_id.isnot(None),
+        ).all()
+
+        inventory_scans = get_latest_scans_per_item("inventory")
+
+        for inventory_item in inventory_items:
+            expected_warehouse_id = inventory_item.warehouse_id
+            expected_warehouse = Warehouse.query.get(expected_warehouse_id)
+            expected_wh_name = (
+                expected_warehouse.name
+                if expected_warehouse
+                else f"WH_{expected_warehouse_id}"
+            )
+
+            latest_scan = inventory_scans.get(inventory_item.id)
+
+            is_misplaced = False
+            severity = None
+            message = None
+
+            if latest_scan is None:
+                is_misplaced = True
+                severity = "HIGH"
+                message = f"Inventory {inventory_item.sku} has no scan history. Location unknown."
+                days_since_scan = None
+            else:
+                days_since_scan = (datetime.utcnow() - latest_scan.timestamp).days
+
+                if latest_scan.warehouse_id != expected_warehouse_id:
+                    is_misplaced = True
+                    severity = "HIGH"
+                    actual_wh = Warehouse.query.get(latest_scan.warehouse_id)
+                    actual_wh_name = (
+                        actual_wh.name if actual_wh else f"WH_{latest_scan.warehouse_id}"
+                    )
+                    message = f"Inventory {inventory_item.sku} expected in {expected_wh_name} but found in {actual_wh_name}"
+
+                    if days_since_scan > 30:
+                        message += f" (Last scanned {days_since_scan} days ago)"
+
+            if is_misplaced:
+                actual_warehouse = (
+                    Warehouse.query.get(latest_scan.warehouse_id)
+                    if latest_scan and latest_scan.warehouse_id
+                    else None
+                )
+                actual_wh_name = (
+                    actual_warehouse.name if actual_warehouse else "Unknown"
+                )
+
+                anomalies.append(
+                    {
+                        "type": "MISPLACED_ITEM",
+                        "severity": severity,
+                        "item_type": "inventory",
+                        "item_id": inventory_item.id,
+                        "item_name": inventory_item.name,
+                        "item_code": inventory_item.sku,
+                        "expected_location": {
+                            "warehouse_id": expected_warehouse_id,
+                            "warehouse_name": expected_wh_name,
+                        },
+                        "actual_location": {
+                            "warehouse_id": latest_scan.warehouse_id if latest_scan else None,
+                            "warehouse_name": actual_wh_name if latest_scan else "No scan data",
+                            "bin_id": latest_scan.bin_id if latest_scan else None,
+                            "timestamp": latest_scan.timestamp.isoformat() if latest_scan else None,
+                        },
+                        "days_since_scan": days_since_scan,
+                        "message": message,
+                    }
+                )
+
+        # =====================================================================
+        # ITEM INSTANCE MISPLACED DETECTION
+        # =====================================================================
+
+        item_instances = (
+            ItemInstance.query.join(InventoryItem)
+            .filter(
+                InventoryItem.organisation_id == org_id,
+                ~ItemInstance.status.in_(["shipped", "lost"]),
+                ItemInstance.warehouse_id.isnot(None),
+            )
+            .all()
+        )
+
+        instance_scans = get_latest_scans_per_item("inventory_instance")
+
+        for instance in item_instances:
+            expected_warehouse_id = instance.warehouse_id
+            expected_bin_id = instance.bin_id
+
+            expected_warehouse = Warehouse.query.get(expected_warehouse_id)
+            expected_wh_name = (
+                expected_warehouse.name
+                if expected_warehouse
+                else f"WH_{expected_warehouse_id}"
+            )
+
+            inventory = InventoryItem.query.get(instance.item_id)
+            item_name = (
+                f"{inventory.name} ({instance.serial_number})"
+                if inventory
+                else str(instance.serial_number)
+            )
+
+            latest_scan = instance_scans.get(instance.id)
+
+            is_misplaced = False
+            severity = None
+            message = None
+
+            if latest_scan is None:
+                is_misplaced = True
+                severity = "HIGH"
+                message = f"Item {instance.serial_number} has no scan history. Location unknown."
+                days_since_scan = None
+            else:
+                days_since_scan = (datetime.utcnow() - latest_scan.timestamp).days
+
+                if latest_scan.warehouse_id != expected_warehouse_id:
+                    is_misplaced = True
+                    severity = "HIGH"
+                    actual_wh = Warehouse.query.get(latest_scan.warehouse_id)
+                    actual_wh_name = (
+                        actual_wh.name if actual_wh else f"WH_{latest_scan.warehouse_id}"
+                    )
+                    message = f"Item {instance.serial_number} expected in {expected_wh_name} but found in {actual_wh_name}"
+
+                elif latest_scan.bin_id and expected_bin_id:
+                    if latest_scan.bin_id != expected_bin_id:
+                        is_misplaced = True
+                        severity = "MEDIUM"
+                        message = f"Item {instance.serial_number} in {expected_wh_name} but wrong bin (scan: {latest_scan.bin_id} vs expected: {expected_bin_id})"
+
+                # Adjust severity for stale data
+                if is_misplaced and days_since_scan > 30:
+                    if severity == "HIGH":
+                        message += f" (Last scanned {days_since_scan} days ago)"
+                    else:
+                        severity = "LOW"
+                        message += f" (Last scanned {days_since_scan} days ago)"
+
+            if is_misplaced:
+                actual_warehouse = (
+                    Warehouse.query.get(latest_scan.warehouse_id)
+                    if latest_scan and latest_scan.warehouse_id
+                    else None
+                )
+                actual_wh_name = (
+                    actual_warehouse.name if actual_warehouse else "Unknown"
+                )
+
+                anomalies.append(
+                    {
+                        "type": "MISPLACED_ITEM",
+                        "severity": severity,
+                        "item_type": "inventory_instance",
+                        "item_id": instance.id,
+                        "item_name": item_name,
+                        "item_code": instance.serial_number,
+                        "expected_location": {
+                            "warehouse_id": expected_warehouse_id,
+                            "warehouse_name": expected_wh_name,
+                            "bin_id": expected_bin_id,
+                        },
+                        "actual_location": {
+                            "warehouse_id": latest_scan.warehouse_id if latest_scan else None,
+                            "warehouse_name": actual_wh_name if latest_scan else "No scan data",
+                            "bin_id": latest_scan.bin_id if latest_scan else None,
+                            "timestamp": latest_scan.timestamp.isoformat() if latest_scan else None,
+                        },
+                        "days_since_scan": days_since_scan,
+                        "message": message,
+                    }
+                )
+
+        # =====================================================================
+        # SORT AND LIMIT RESULTS
+        # =====================================================================
+        # Sort by: Severity (HIGH first) → Days since scan (oldest first)
+
+        severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        anomalies.sort(
+            key=lambda x: (
+                severity_order.get(x["severity"], 3),
+                -(x["days_since_scan"] or 0),  # Oldest first (negate to reverse)
+            )
+        )
+
+        if limit:
+            anomalies = anomalies[:limit]
+
+        return anomalies
