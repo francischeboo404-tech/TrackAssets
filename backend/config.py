@@ -138,6 +138,13 @@ class Config:
     QR_PAYLOAD_TTL_DAYS = int(os.environ.get("QR_PAYLOAD_TTL_DAYS", "365"))
     SCAN_DEDUP_SECONDS = int(os.environ.get("SCAN_DEDUP_SECONDS", "30"))
 
+    # Misplaced Items Detection (Phase 4)
+    # Publish real-time anomaly alerts to SSE when items are detected as misplaced
+    ENABLE_MISPLACED_DETECTION_PER_SCAN = (
+        os.environ.get("ENABLE_MISPLACED_DETECTION_PER_SCAN", "true").lower() == "true"
+    )
+    SCAN_STALE_DAYS_THRESHOLD = int(os.environ.get("SCAN_STALE_DAYS_THRESHOLD", "30"))
+
     _db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URL_PROD")
     SQLALCHEMY_ENGINE_OPTIONS = _postgres_engine_options(_db_url)
 
