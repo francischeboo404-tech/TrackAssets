@@ -34,6 +34,20 @@ Legacy assets also support `asset:{org_id}:{asset_code}` with signature.
 
 `TrackingService` publishes `SCAN_EVENT` on the existing SSE bus (`/api/analytics/stream`). Frontend `useSSE` invalidates assets, inventory, and history caches.
 
+Transport details worth knowing:
+
+- `record_scan` buffers its events and publishes them only after the transaction
+  commits, so a client never refetches data that has not landed yet.
+- `event_bus.publish()` writes on a connection of its own and never commits the
+  caller's transaction.
+- The stream emits an SSE `id:` per event and a comment heartbeat every ~15s. The
+  heartbeat both keeps proxies from cutting an idle connection (nginx and Render
+  cut at ~55-60s) and lets the generator notice a client that has gone away.
+- A reconnecting client resumes from a cursor, passed as `Last-Event-ID` or, for
+  `EventSource` which cannot set headers, as `?last_event_id=`. Without one, a
+  cold connect replays the last five seconds.
+- `system_events` rows are pruned by a daily cron job; see `BACKEND_SETUP.md`.
+- 
 ## Security
 
 - HMAC verification server-side only (`SECRET_KEY`)
@@ -47,3 +61,11 @@ Legacy assets also support `asset:{org_id}:{asset_code}` with signature.
 - Set `TRACKING_PUBLIC_URL` to production frontend `/tracking`
 - Apply `supabase/migrations/001_rls_policies.sql` scan_events policies
 - Run Alembic migration `b2c4e8f1a901`
+
+- Set `VITE_MAP_TILE_URL` and `VITE_MAP_TILE_ATTRIBUTION` to a keyed tile
+  provider. The defaults point at the public OpenStreetMap tile servers, which
+  their usage policy does not permit for production traffic
+- Set `CRON_SECRET` and schedule `/cron/prune-system-events` daily alongside the
+  existing `/cron/keepalive` job
+- Scrub query strings from access logs for `/api/analytics/stream`, which carries
+  the JWT in the URL (see `BACKEND_SETUP.md`)
