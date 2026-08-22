@@ -145,6 +145,21 @@ class Config:
     )
     SCAN_STALE_DAYS_THRESHOLD = int(os.environ.get("SCAN_STALE_DAYS_THRESHOLD", "30"))
 
+
+    # Ceiling for impossible-travel detection, in km/h. Roughly commercial-jet
+    # cruise, so legitimate freight never trips it.
+    MAX_PLAUSIBLE_SPEED_KMH = float(
+        os.environ.get("MAX_PLAUSIBLE_SPEED_KMH", "900")
+    )
+
+    # Retention for the system_events table, which exists only so browser
+    # tabs can be told something happened. Every publish() writes a row into
+    # the same table the SSE poll queries, so it needs pruning; the business
+    # ledger (scan_events) is never touched by this.
+    SYSTEM_EVENT_RETENTION_DAYS = int(
+        os.environ.get("SYSTEM_EVENT_RETENTION_DAYS", "7")
+    )
+
     _db_url = os.environ.get("DATABASE_URL") or os.environ.get("DATABASE_URL_PROD")
     SQLALCHEMY_ENGINE_OPTIONS = _postgres_engine_options(_db_url)
 
