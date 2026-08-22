@@ -44,7 +44,7 @@ class EventBus:
         """
         # Attempt DB persistence; if it fails (e.g., tests mocking db), fall back.
         try:
-           from sqlalchemy.orm import Session
+            from sqlalchemy.orm import Session
 
             with Session(bind=db.engine, expire_on_commit=False) as pub_session:
                 event = SystemEvent(
@@ -86,7 +86,7 @@ class EventBus:
         hold the request-level session open across the entire stream lifetime.
         """
         from flask import current_app
-       from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.orm import sessionmaker
 
         # Cursor tradeoff, deliberately accepted: an id-based cursor can skip a
         # row. If one transaction takes id 100 and another takes 101 but commits
