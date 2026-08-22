@@ -301,6 +301,12 @@ class TrackingService:
             timestamp=datetime.utcnow(),
         )
         sess.add(event)
+        # Force the INSERT now. Nothing else in this method flushes
+        # (AuditService.log_action defaults to commit=False), so without this
+        # event.id is null when the SCAN_EVENT payload is built below, and
+        # AnomalyService's "exclude the current row" predicate has no key to
+        # compare against.
+        sess.flush()
 
         AuditService.log_action(
             action=f"QR_SCAN_{action_type}",
@@ -318,22 +324,28 @@ class TrackingService:
             session=sess,
         )
 
-        event_bus.publish(
-            "SCAN_EVENT",
-            {
-                "scan_event_id": event.id,
-                "item_id": item.id,
-                "type": item_type,
-                "warehouse_id": warehouse_id,
-                "action": action_type,
-                "previous_state": previous_state,
-                "new_state": new_state,
-                "lat": lat,
-                "lon": lon,
-                "timestamp": event.timestamp.isoformat(),
-            },
-            organisation_id=org_id,
-        )
+        # Events are buffered rather than published inline. event_bus.publish()
+        # commits on a connection of its own, so anything published here would be
+        # visible to SSE pollers before this scan commits — clients would refetch
+        # data that has not landed yet — and a failure further down would leave
+        # delivered events describing a scan that was rolled back.
+        pending_events = [
+            (
+                "SCAN_EVENT",
+                {
+                    "scan_event_id": event.id,
+                    "item_id": item.id,
+                    "type": item_type,
+                    "warehouse_id": warehouse_id,
+                    "action": action_type,
+                    "previous_state": previous_state,
+                    "new_state": new_state,
+                    "lat": lat,
+                    "lon": lon,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+        ]
 
         # Real-time anomaly detection and publishing to SSE bus
         from app.services.anomaly_service import AnomalyService
@@ -341,19 +353,20 @@ class TrackingService:
         # Compute scan-specific anomalies once for both SSE publishing and response
         scan_anomalies = AnomalyService.analyze_scan(event)
 
-        # Publish scan-specific anomalies (impossible travel, etc.) to SSE
+        # Publish scan-specific anomalies (impossible travel, etc.) for SSE
         if scan_anomalies:
             for anomaly in scan_anomalies:
-                event_bus.publish(
-                    "SCAN_ANOMALY_DETECTED",
-                    {
-                        "type": anomaly["type"],
-                        "severity": anomaly.get("severity", "MEDIUM"),
-                        "item_id": item.id,
-                        "item_type": item_type,
-                        "message": anomaly["message"],
-                    },
-                    organisation_id=org_id,
+                pending_events.append(
+                    (
+                        "SCAN_ANOMALY_DETECTED",
+                        {
+                            "type": anomaly["type"],
+                            "severity": anomaly.get("severity", "MEDIUM"),
+                            "item_id": item.id,
+                            "item_type": item_type,
+                            "message": anomaly["message"],
+                        },
+                    )
                 )
 
         # Per-scan misplaced items detection
@@ -361,25 +374,31 @@ class TrackingService:
             misplaced = AnomalyService.predict_misplaced_items(org_id, limit=5)
             if misplaced:
                 for anomaly in misplaced:
-                    event_bus.publish(
-                        "MISPLACED_ITEM_DETECTED",
-                        {
-                            "type": "MISPLACED_ITEM",
-                            "severity": anomaly["severity"],
-                            "item_type": anomaly["item_type"],
-                            "item_id": anomaly["item_id"],
-                            "item_name": anomaly["item_name"],
-                            "item_code": anomaly.get("item_code"),
-                            "expected_location": anomaly["expected_location"],
-                            "actual_location": anomaly["actual_location"],
-                            "days_since_scan": anomaly["days_since_scan"],
-                            "message": anomaly["message"],
-                        },
-                        organisation_id=org_id,
+                    pending_events.append(
+                        (
+                            "MISPLACED_ITEM_DETECTED",
+                            {
+                                "type": "MISPLACED_ITEM",
+                                "severity": anomaly["severity"],
+                                "item_type": anomaly["item_type"],
+                                "item_id": anomaly["item_id"],
+                                "item_name": anomaly["item_name"],
+                                "item_code": anomaly.get("item_code"),
+                                "expected_location": anomaly["expected_location"],
+                                "actual_location": anomaly["actual_location"],
+                                "days_since_scan": anomaly["days_since_scan"],
+                                "message": anomaly["message"],
+                            },
+                        )
                     )
 
         sess.commit()
 
+
+       # Only now that the scan is durable is it safe to announce it.
+        for pending_type, pending_payload in pending_events:
+            event_bus.publish(pending_type, pending_payload, organisation_id=org_id)
+            
         # Return the scan result with anomalies (already computed above)
         return item, event, scan_anomalies
 
