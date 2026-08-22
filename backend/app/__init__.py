@@ -1,7 +1,7 @@
 import os
 import shutil
 import os as _os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -257,6 +257,8 @@ def create_app(config_name=None):
             "/ping",
             "/cron/keepalive",
             "/api/cron/keepalive",
+            "/cron/prune-system-events",
+            "/api/cron/prune-system-events",
         }
 
         def _cron_keepalive_response():
@@ -340,6 +342,98 @@ def create_app(config_name=None):
         def api_cron_keepalive():
             return _cron_keepalive_response()
 
+        def _cron_prune_system_events_response():
+            """Prune expired system_events rows; call daily from cron-job.org.
+
+            system_events is disposable SSE plumbing: one row per publish(),
+            written into the very table every open stream polls every two
+            seconds. This deletes rows past the retention window. It must never
+            touch scan_events, which is the permanent business ledger.
+            """
+            secret = app.config.get("CRON_SECRET")
+            if secret:
+                provided = (
+                    request.args.get("token")
+                    or request.headers.get("X-Cron-Secret")
+                )
+                if provided != secret:
+                    return (
+                        jsonify(
+                            {
+                                "ok": False,
+                                "message": "Invalid or missing cron token",
+                                "status_code": 401,
+                            }
+                        ),
+                        401,
+                    )
+
+            from app.models.event import SystemEvent
+
+            retention_days = app.config.get("SYSTEM_EVENT_RETENTION_DAYS", 7)
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                days=retention_days
+            )
+
+            # Bounded batches, committed as we go. A single unbounded DELETE
+            # would hold a long lock on the table live streams are polling.
+            batch_size = 500
+            max_batches = 200
+            deleted = 0
+            try:
+                for _ in range(max_batches):
+                    ids = [
+                        row_id
+                        for (row_id,) in db.session.query(SystemEvent.id)
+                        .filter(SystemEvent.created_at < cutoff)
+                        .order_by(SystemEvent.id.asc())
+                        .limit(batch_size)
+                        .all()
+                    ]
+                    if not ids:
+                        break
+                    db.session.query(SystemEvent).filter(
+                        SystemEvent.id.in_(ids)
+                    ).delete(synchronize_session=False)
+                    db.session.commit()
+                    deleted += len(ids)
+            except Exception as exc:
+                db.session.rollback()
+                app.logger.error("system_events pruning failed: %s", exc)
+                return (
+                    jsonify(
+                        {
+                            "ok": False,
+                            "message": "Pruning failed",
+                            "deleted": deleted,
+                        }
+                    ),
+                    500,
+                )
+
+            return (
+                jsonify(
+                    {
+                        "ok": True,
+                        "service": "trackit",
+                        "purpose": "prune-system-events",
+                        "retention_days": retention_days,
+                        "cutoff": cutoff.isoformat(),
+                        "deleted": deleted,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+                200,
+            )
+
+        @app.route("/cron/prune-system-events", methods=["GET", "POST"])
+        def cron_prune_system_events():
+            return _cron_prune_system_events_response()
+
+        @app.route("/api/cron/prune-system-events", methods=["GET", "POST"])
+        def api_cron_prune_system_events():
+            return _cron_prune_system_events_response()
+            
         @app.route("/", methods=["GET"])
         def index():
             """Root endpoint providing basic API information."""
