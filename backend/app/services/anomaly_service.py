@@ -1,16 +1,56 @@
+import math
 from datetime import datetime, timedelta
+from flask import current_app
 from app.models import ScanEvent
 
 
 class AnomalyService:
     """Intelligent analysis of tracking data to detect anomalies and drift."""
+    # Speed above which a movement is treated as physically impossible rather
+    # than merely fast. The default is roughly commercial-jet cruise, so it
+    # clears any legitimate ground or air freight movement.
+    DEFAULT_MAX_PLAUSIBLE_SPEED_KMH = 900.0
 
+    # Below this, two fixes are treated as the same place: consumer GPS scatter
+    # and warehouse-scale movement should not read as travel.
+    _MIN_SIGNIFICANT_DISTANCE_KM = 1.0
+
+    @staticmethod
+    def _haversine_km(lat1, lon1, lat2, lon2):
+        """Great-circle distance between two WGS84 points, in kilometres."""
+        earth_radius_km = 6371.0088
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        d_phi = math.radians(lat2 - lat1)
+        d_lambda = math.radians(lon2 - lon1)
+        a = (
+            math.sin(d_phi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+        )
+        return 2 * earth_radius_km * math.asin(math.sqrt(min(1.0, a)))
+
+    @staticmethod
+    def _max_plausible_speed_kmh():
+        try:
+            return float(
+                current_app.config.get(
+                    "MAX_PLAUSIBLE_SPEED_KMH",
+                    AnomalyService.DEFAULT_MAX_PLAUSIBLE_SPEED_KMH,
+                )
+            )
+        except (RuntimeError, TypeError, ValueError):
+            # No application context, or a malformed override.
+            return AnomalyService.DEFAULT_MAX_PLAUSIBLE_SPEED_KMH
+    
     @staticmethod
     def analyze_scan(current_event: ScanEvent):
         """Perform real-time analysis of a new scan event."""
         anomalies = []
 
         # 1. Impossible Travel Detection
+        # item_id is only unique within an organisation, so this must be
+        # tenant-scoped: without the organisation predicate, asset #42 here is
+        # compared against asset #42 everywhere else, which both fabricates HIGH
+        # severity alerts and leaks another tenant's movement timing.        
         prev_event = (
             ScanEvent.query.filter(
                 ScanEvent.item_type == current_event.item_type,
@@ -26,8 +66,51 @@ class AnomalyService:
             time_diff = (
                 current_event.timestamp - prev_event.timestamp
             ).total_seconds() / 60
-            # If changed warehouses within a ridiculously short time (e.g., < 10 mins)
-            if (
+
+            # Prefer the coordinates the scan already captured. The warehouse
+            # rule below cannot tell a move across the yard from a move across
+            # the planet, and says nothing at all about two scans in the same
+            # warehouse. It stays as the fallback for scans without a fix.
+            coords = (
+                prev_event.latitude,
+                prev_event.longitude,
+                current_event.latitude,
+                current_event.longitude,
+            )
+            if all(c is not None for c in coords):
+                distance_km = AnomalyService._haversine_km(*coords)
+                max_speed = AnomalyService._max_plausible_speed_kmh()
+                hours = time_diff / 60
+
+                if distance_km >= AnomalyService._MIN_SIGNIFICANT_DISTANCE_KM:
+                    if hours <= 0:
+                        # Same instant, two places: no speed is finite.
+                        anomalies.append(
+                            {
+                                "type": "IMPOSSIBLE_TRAVEL",
+                                "severity": "HIGH",
+                                "message": (
+                                    f"Item scanned {distance_km:.1f} km apart with no time "
+                                    f"between scans. Potential spoofing."
+                                ),
+                            }
+                        )
+                    elif (distance_km / hours) > max_speed:
+                        implied_speed = distance_km / hours
+                        anomalies.append(
+                            {
+                                "type": "IMPOSSIBLE_TRAVEL",
+                                "severity": "HIGH",
+                                "message": (
+                                    f"Item moved {distance_km:.1f} km in {time_diff:.1f} minutes "
+                                    f"({implied_speed:.0f} km/h, ceiling {max_speed:.0f} km/h). "
+                                    f"Potential spoofing."
+                                ),
+                            }
+                        )
+            # Fallback for scans with no coordinates: changed warehouses within a
+            # ridiculously short time (e.g., < 10 mins)
+            elif (
                 prev_event.warehouse_id != current_event.warehouse_id
                 and time_diff < 10
             ):
