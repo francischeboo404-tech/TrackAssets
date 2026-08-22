@@ -211,8 +211,26 @@ def stream_events():
     g.user = user_obj
 
     org_id = get_current_organisation_id()
+
+    # Resume cursor. The standard place for it is the Last-Event-ID header,
+    # which the browser sends on its own reconnects; EventSource cannot set
+    # headers, so a client driving its own reconnect passes it as a query
+    # parameter instead (see useSSE.ts). Anything non-numeric is treated as no
+    # cursor at all rather than as an error.
+    raw_cursor = request.headers.get("Last-Event-ID") or request.args.get(
+        "last_event_id"
+    )
     try:
-        gen = event_bus.stream(organisation_id=org_id)
+        last_event_id = int(raw_cursor) if raw_cursor else None
+    except (TypeError, ValueError):
+        last_event_id = None
+    if last_event_id is not None and last_event_id < 0:
+        last_event_id = None
+    
+    try:
+        gen = event_bus.stream(
+            organisation_id=org_id, last_event_id=last_event_id
+        )
         return Response(
             gen,
             mimetype="text/event-stream",
