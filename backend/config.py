@@ -181,7 +181,7 @@ class Config:
 
     # Password reset token TTL — 1 minute (60 seconds) as required
     PASSWORD_RESET_TOKEN_TTL_SECONDS = int(
-        os.environ.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", "60")
+        os.environ.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", "1800")
     )
 
     # -------------------------------------------------------
