@@ -24,7 +24,8 @@ class TokenBlacklist(db.Model):
 
 
 class PasswordResetToken(db.Model):
-    """Secure password reset token. TTL is configurable via PASSWORD_RESET_TOKEN_TTL_SECONDS (see config.py)."""
+    """Secure password reset token. TTL is configurable via
+    PASSWORD_RESET_TOKEN_TTL_SECONDS (see config.py)."""
 
     __tablename__ = "password_reset_tokens"
 
