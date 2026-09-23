@@ -179,7 +179,13 @@ class Config:
     # Frontend base URL for password-reset links
     FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:5173")
 
-    # Password reset token TTL — 1 minute (60 seconds) as required
+    # Password reset token TTL, in seconds. Default 30 minutes.
+    # NOTE: this was previously defaulted to 60 seconds, which is not enough
+    # time in practice for an email to arrive and for the user to open it and
+    # click through — that alone made "forgot password" fail for most real
+    # users even when everything else worked correctly. 30 minutes is a
+    # common, reasonable default for email-based reset links; override via
+    # the env var if you need something different.
     PASSWORD_RESET_TOKEN_TTL_SECONDS = int(
         os.environ.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", "1800")
     )
