@@ -24,7 +24,7 @@ class TokenBlacklist(db.Model):
 
 
 class PasswordResetToken(db.Model):
-    """Secure password reset token with TTL (1 minute expiry)"""
+    """Secure password reset token. TTL is configurable via PASSWORD_RESET_TOKEN_TTL_SECONDS (see config.py)."""
 
     __tablename__ = "password_reset_tokens"
 
@@ -45,7 +45,7 @@ class PasswordResetToken(db.Model):
     user = db.relationship("User", backref="reset_tokens", lazy=True)
 
     def is_valid(self):
-        """Check if token is not expired (1-minute TTL) and not already used"""
+        """Check if token is not expired and not already used"""
         return self.used_at is None and datetime.utcnow() < self.expires_at
 
     def __repr__(self):
