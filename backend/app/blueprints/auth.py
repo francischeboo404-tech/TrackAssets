@@ -353,6 +353,7 @@ def get_current_user():
         200,
     )
 
+
 def _format_duration(seconds: int) -> str:
     """Render a TTL in seconds as a short human-readable string."""
     seconds = int(seconds)
@@ -409,7 +410,6 @@ def forgot_password():
         log_security_event("FORGOT_PASSWORD_UNKNOWN_EMAIL", email=email)
         return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
 
-    # Invalidate any existing unused tokens for this user
     # Everything below MUST run against the shared "public" schema — users
     # and password_reset_tokens are shared tables, not per-tenant ones. This
     # is wrapped explicitly (rather than relying on whatever search_path the
@@ -419,11 +419,11 @@ def forgot_password():
         # Invalidate any existing unused tokens for this user
         PasswordResetToken.query.filter_by(user_id=user_obj.id, used_at=None).delete()
 
-    # Generate a secure random token and store its SHA-256 hash
+        # Generate a secure random token and store its SHA-256 hash
         raw_token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
-    reset_token = PasswordResetToken(
+        reset_token = PasswordResetToken(
             user_id=user_obj.id,
             token_hash=token_hash,
             expires_at=expires_at,
@@ -441,7 +441,6 @@ def forgot_password():
         from app import mail
 
         ttl_display = _format_duration(ttl_seconds)
-
         msg = Message(
             subject=f"TrackIT — Password Reset (expires in {ttl_display})",
             recipients=[user_obj.email],
