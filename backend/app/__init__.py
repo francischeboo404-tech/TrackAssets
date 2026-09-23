@@ -500,40 +500,40 @@ def create_app(config_name=None):
         @app.before_request
         def handle_tenant_isolation():
             """
-+            Ensure a deterministic database search_path for every request.
-+
-+            IMPORTANT: the SQLAlchemy connection pool reuses Postgres
-+            connections across requests. Postgres "SET search_path" persists
-+            on a connection until it is changed again — it is NOT reset
-+            automatically when the connection is returned to the pool. So a
-+            connection that just served an authenticated tenant request
-+            (search_path = "tenant_0007, public") can be handed to the very
-+            next request — including an unauthenticated /api/auth/* call —
-+            while still pointed at tenant_0007.
-+
-+            That previously caused password-reset tokens (and any other
-+            shared/public-schema write from an /api/auth/* route) to be
-+            silently written into whatever tenant schema happened to be left
-+            on the connection, instead of the shared "public" schema where
-+            forgot-password/reset-password look for them — making password
-+            reset fail intermittently in production while working fine
-+            locally on SQLite (which has no schemas).
-+
-+            Fix: unconditionally reset to "public" at the start of every
-+            request, then switch to the caller's tenant schema only if this
-+            is an authenticated, tenant-scoped route.
-+            """
-+            if request.path.startswith("/static") or request.method == "OPTIONS":
-+                return
-+
-+            if _uses_postgres_schemas():
-+                try:
-+                    db.session.execute(sa_text("SET search_path TO public"))
-+                except Exception as e:
-+                    app.logger.debug(f"Failed to reset search_path to public: {str(e)}")
-+
-+            # Shared/public routes (including all /api/auth/* endpoints) stay
-+            # on the public schema — nothing more to do.
+            Ensure a deterministic database search_path for every request.
+
+            IMPORTANT: the SQLAlchemy connection pool reuses Postgres
+            connections across requests. Postgres "SET search_path" persists
+            on a connection until it is changed again — it is NOT reset
+            automatically when the connection is returned to the pool. So a
+            connection that just served an authenticated tenant request
+            (search_path = "tenant_0007, public") can be handed to the very
+            next request — including an unauthenticated /api/auth/* call —
+            while still pointed at tenant_0007.
+
+            That previously caused password-reset tokens (and any other
+            shared/public-schema write from an /api/auth/* route) to be
+            silently written into whatever tenant schema happened to be left
+            on the connection, instead of the shared "public" schema where
+            forgot-password/reset-password look for them — making password
+            reset fail intermittently in production while working fine
+            locally on SQLite (which has no schemas).
+
+            Fix: unconditionally reset to "public" at the start of every
+            request, then switch to the caller's tenant schema only if this
+            is an authenticated, tenant-scoped route.
+            """
+            if request.path.startswith("/static") or request.method == "OPTIONS":
+                return
+
+            if _uses_postgres_schemas():
+                try:
+                    db.session.execute(sa_text("SET search_path TO public"))
+                except Exception as e:
+                    app.logger.debug(f"Failed to reset search_path to public: {str(e)}")
+
+            # Shared/public routes (including all /api/auth/* endpoints) stay
+            # on the public schema — nothing more to do.
     
             if (
                 request.path in _PUBLIC_PATHS
