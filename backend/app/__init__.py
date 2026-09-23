@@ -14,7 +14,6 @@ from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sa_text
 
-
 db = SQLAlchemy()
 jwt = JWTManager()
 mail = Mail()
@@ -534,7 +533,6 @@ def create_app(config_name=None):
 
             # Shared/public routes (including all /api/auth/* endpoints) stay
             # on the public schema — nothing more to do.
-    
             if (
                 request.path in _PUBLIC_PATHS
                 or request.path.startswith("/api/auth/")
