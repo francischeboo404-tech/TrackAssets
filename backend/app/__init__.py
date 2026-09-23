@@ -14,6 +14,7 @@ from flask_mail import Mail
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text as sa_text
 
+
 db = SQLAlchemy()
 jwt = JWTManager()
 mail = Mail()
@@ -494,16 +495,48 @@ def create_app(config_name=None):
                 return resp
 
         # Multi-tenant Schema Isolation
-        from app.tenant_utils import set_tenant_schema
+        from app.tenant_utils import set_tenant_schema, _uses_postgres_schemas
 
         @app.before_request
         def handle_tenant_isolation():
-            """Switch database schema based on the authenticated user's organization."""
-            # Skip for non-API, public routes, and OPTIONS preflight
+            """
++            Ensure a deterministic database search_path for every request.
++
++            IMPORTANT: the SQLAlchemy connection pool reuses Postgres
++            connections across requests. Postgres "SET search_path" persists
++            on a connection until it is changed again — it is NOT reset
++            automatically when the connection is returned to the pool. So a
++            connection that just served an authenticated tenant request
++            (search_path = "tenant_0007, public") can be handed to the very
++            next request — including an unauthenticated /api/auth/* call —
++            while still pointed at tenant_0007.
++
++            That previously caused password-reset tokens (and any other
++            shared/public-schema write from an /api/auth/* route) to be
++            silently written into whatever tenant schema happened to be left
++            on the connection, instead of the shared "public" schema where
++            forgot-password/reset-password look for them — making password
++            reset fail intermittently in production while working fine
++            locally on SQLite (which has no schemas).
++
++            Fix: unconditionally reset to "public" at the start of every
++            request, then switch to the caller's tenant schema only if this
++            is an authenticated, tenant-scoped route.
++            """
++            if request.path.startswith("/static") or request.method == "OPTIONS":
++                return
++
++            if _uses_postgres_schemas():
++                try:
++                    db.session.execute(sa_text("SET search_path TO public"))
++                except Exception as e:
++                    app.logger.debug(f"Failed to reset search_path to public: {str(e)}")
++
++            # Shared/public routes (including all /api/auth/* endpoints) stay
++            # on the public schema — nothing more to do.
+    
             if (
-                request.path.startswith("/static")
-                or request.method == "OPTIONS"
-                or request.path in _PUBLIC_PATHS
+                request.path in _PUBLIC_PATHS
                 or request.path.startswith("/api/auth/")
                 or request.path.startswith("/api/cron/")
             ):
