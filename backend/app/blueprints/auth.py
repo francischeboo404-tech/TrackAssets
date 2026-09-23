@@ -353,9 +353,20 @@ def get_current_user():
         200,
     )
 
+def _format_duration(seconds: int) -> str:
+    """Render a TTL in seconds as a short human-readable string."""
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds} second{'s' if seconds != 1 else ''}"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    hours = minutes // 60
+    return f"{hours} hour{'s' if hours != 1 else ''}"
+
 
 # ---------------------------------------------------------------------------
-# Password Reset (1-minute expiry)
+# Password Reset
 # ---------------------------------------------------------------------------
 
 @auth_bp.route("/forgot-password", methods=["OPTIONS"])
@@ -371,7 +382,7 @@ def forgot_password():
 
     Body: { "email": "user@example.com" }
 
-    A time-limited token (TTL = PASSWORD_RESET_TOKEN_TTL_SECONDS, default 60 s)
+    A time-limited token (TTL = PASSWORD_RESET_TOKEN_TTL_SECONDS, default 1800 s / 30 min)
     is generated, its SHA-256 hash stored, and a reset link emailed to the user.
     The response is always 200 to avoid email enumeration.
     """
@@ -387,7 +398,7 @@ def forgot_password():
         # Always 200 — do not reveal whether email exists
         return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
 
-    ttl_seconds = current_app.config.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", 60)
+    ttl_seconds = current_app.config.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", 1800)
     expires_at = datetime.utcnow() + timedelta(seconds=ttl_seconds)
 
     with public_schema():
@@ -399,19 +410,26 @@ def forgot_password():
         return jsonify({"message": "If that email is registered, a reset link has been sent."}), 200
 
     # Invalidate any existing unused tokens for this user
-    PasswordResetToken.query.filter_by(user_id=user_obj.id, used_at=None).delete()
+    # Everything below MUST run against the shared "public" schema — users
+    # and password_reset_tokens are shared tables, not per-tenant ones. This
+    # is wrapped explicitly (rather than relying on whatever search_path the
+    # pooled connection happens to have) so the token is always written
+    # where /auth/reset-password will actually look for it.
+    with public_schema():
+        # Invalidate any existing unused tokens for this user
+        PasswordResetToken.query.filter_by(user_id=user_obj.id, used_at=None).delete()
 
     # Generate a secure random token and store its SHA-256 hash
-    raw_token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        raw_token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
     reset_token = PasswordResetToken(
-        user_id=user_obj.id,
-        token_hash=token_hash,
-        expires_at=expires_at,
-    )
-    db.session.add(reset_token)
-    db.session.commit()
+            user_id=user_obj.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        db.session.add(reset_token)
+        db.session.commit()
 
     # Build the reset link pointing at the frontend
     frontend_url = current_app.config.get("FRONTEND_BASE_URL", "http://localhost:5173")
@@ -422,14 +440,16 @@ def forgot_password():
         from flask_mail import Message
         from app import mail
 
+        ttl_display = _format_duration(ttl_seconds)
+
         msg = Message(
-            subject="TrackIT — Password Reset (expires in 1 minute)",
+            subject=f"TrackIT — Password Reset (expires in {ttl_display})",
             recipients=[user_obj.email],
             body=(
                 f"Hello {user_obj.first_name or user_obj.username},\n\n"
                 f"You requested a password reset for your TrackIT account.\n\n"
                 f"Click the link below to reset your password "
-                f"(valid for {ttl_seconds} seconds only):\n\n"
+                f"(valid for {ttl_display} only):\n\n"
                 f"{reset_link}\n\n"
                 f"If you did not request this, please ignore this email "
                 f"and contact your administrator immediately.\n\n"
@@ -438,7 +458,11 @@ def forgot_password():
         )
         mail.send(msg)
     except Exception as exc:  # noqa: BLE001
-        current_app.logger.warning("Password-reset email failed: %s", exc)
+        current_app.logger.error(
+            "Password-reset email failed to send for user_id=%s: %s",
+            user_obj.id,
+            exc,
+        )
 
     log_security_event(
         "FORGOT_PASSWORD_REQUESTED",
@@ -469,7 +493,7 @@ def reset_password():
 
     Body: { "token": "<raw_token>", "new_password": "<new_password>" }
 
-    The token is valid for PASSWORD_RESET_TOKEN_TTL_SECONDS (default 60 s).
+    The token is valid for PASSWORD_RESET_TOKEN_TTL_SECONDS (default 1800 s / 30 min).
     Once used, the token is marked as consumed and cannot be reused.
     """
     import hashlib
@@ -486,45 +510,53 @@ def reset_password():
     if len(new_password) < 8:
         raise ValidationError("Password must be at least 8 characters.")
 
-    # Hash the incoming token to compare against stored hash
+    # Hash the incoming token to compare against stored hash.
+    # Everything here runs against the shared "public" schema — the token
+    # (and the user it belongs to) live there, not in any tenant schema —
+    # see forgot_password() above and handle_tenant_isolation() in
+    # app/__init__.py for why this must be explicit.
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
-    reset_token = PasswordResetToken.query.filter_by(
-        token_hash=token_hash, used_at=None
-    ).first()
+    with public_schema():
+        reset_token = PasswordResetToken.query.filter_by(
+            token_hash=token_hash, used_at=None
+        ).first()
 
-    if not reset_token:
-        log_security_event("RESET_PASSWORD_INVALID_TOKEN", ip=request.remote_addr)
-        raise ValidationError("Invalid or already-used reset token.")
+        if not reset_token:
+            log_security_event("RESET_PASSWORD_INVALID_TOKEN", ip=request.remote_addr)
+            raise ValidationError("Invalid or already-used reset token.")
 
-    if not reset_token.is_valid():
-        # Token expired — 1 minute has elapsed
-        log_security_event(
-            "RESET_PASSWORD_EXPIRED_TOKEN",
-            user_id=reset_token.user_id,
-            ip=request.remote_addr,
-        )
-        raise ValidationError(
-            "This password reset link has expired (1-minute limit). "
-            "Please request a new one."
-        )
+        if not reset_token.is_valid():
+            # Token expired
+            log_security_event(
+                "RESET_PASSWORD_EXPIRED_TOKEN",
+                user_id=reset_token.user_id,
+                ip=request.remote_addr,
+            )
+            ttl_display = _format_duration(
+                current_app.config.get("PASSWORD_RESET_TOKEN_TTL_SECONDS", 1800)
+            )
+            raise ValidationError(
+                f"This password reset link has expired ({ttl_display} limit). "
+                "Please request a new one."
+            )
 
-    user_obj = reset_token.user
-    if not user_obj or not user_obj.is_active:
-        raise ValidationError("User account is not active.")
+        user_obj = user.User.query.get(reset_token.user_id)
+        if not user_obj or not user_obj.is_active:
+            raise ValidationError("User account is not active.")
 
-    # Hash and apply the new password
-    password_bytes = new_password.encode("utf-8")
-    salt = bcrypt.gensalt(rounds=current_app.config["BCRYPT_LOG_ROUNDS"])
-    user_obj.password_hash = bcrypt.hashpw(password_bytes, salt).decode("utf-8")
+        # Hash and apply the new password
+        password_bytes = new_password.encode("utf-8")
+        salt = bcrypt.gensalt(rounds=current_app.config["BCRYPT_LOG_ROUNDS"])
+        user_obj.password_hash = bcrypt.hashpw(password_bytes, salt).decode("utf-8")
 
-    # Mark token as used
-    reset_token.used_at = datetime.utcnow()
+        # Mark token as used
+        reset_token.used_at = datetime.utcnow()
 
-    # Invalidate all active sessions by clearing locked_until and failed attempts
-    user_obj.failed_login_attempts = 0
-    user_obj.locked_until = None
+        # Invalidate all active sessions by clearing locked_until and failed attempts
+        user_obj.failed_login_attempts = 0
+        user_obj.locked_until = None
 
-    db.session.commit()
+        db.session.commit()
 
     log_security_event(
         "RESET_PASSWORD_SUCCESS",
